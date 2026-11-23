@@ -12,6 +12,7 @@ Com o Avast (ou AVG, Kaspersky, ESET…) ligado, o WebGuardian agora pede ao pr�
 - **Verificação rápida e completa pelo outro antivírus**, direto do painel ou pelo atalho de emergência, com **porcentagem real** (arquivos conferidos de um total).
 - **Verificação rápida automática uma vez por dia**, em segundo plano, 20 minutos depois de ligar o PC. Você só é avisado se algo for encontrado. Com o Defender, ela é pulada se ele já fez a dele nas últimas 24 h.
 - Se o outro antivírus não atender pedidos pelo AMSI, o WebGuardian não afirma "Limpo": mostra "Sem bloqueio" e orienta a usar a tela dele.
+- **Ameaças detectadas pelo Defender agora aparecem na aba Decisões**, como na Segurança do Windows: **Liberar** (alarme falso: o Defender passa a permitir e devolve o arquivo da quarentena) ou **Apagar** (remove a ameaça ativa; se já estiver na quarentena, ela continua presa lá). Uma decisão por ameaça e arquivo, sem repetir detecções do mesmo arquivo. Bloqueios só na memória continuam como alerta.
 - GitHub: link **Baixar o WebGuardian** no topo da página principal, sempre com a versão mais recente.
 
 ## 1.8.1 — 2026-11-23

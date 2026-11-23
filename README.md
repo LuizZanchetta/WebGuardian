@@ -165,7 +165,7 @@ Abra pelo atalho **WebGuardian** ou dê dois cliques no **escudo perto do relóg
 | Aba | O que mostra |
 |---|---|
 | **Resumo** | Estado geral do PC, camadas de proteção, ações de emergência, **acessos e alertas desta sessão** e últimos downloads |
-| **Decisões** | Itens isolados esperando você: **Liberar** (era seguro) ou **Apagar ameaça** |
+| **Decisões** | Itens isolados pelo WebGuardian **e ameaças detectadas pelo Defender** esperando você: **Liberar** (era seguro) ou **Apagar ameaça** |
 | **Atividade** | Tudo o que o WebGuardian registrou **desde que o PC foi ligado** |
 | **Conexões** | Programas conectados à internet agora (suspeitos em destaque) |
 | **Defender** | Estado do Defender, base de ameaças, proteções extras, verificações, ameaças e downloads verificados |
@@ -339,7 +339,8 @@ Notas completas de cada versão: [CHANGELOG](CHANGELOG.md) e [Releases](https://
 
 - **1.8.2** — verificação pelo antivírus ativo (Avast, AVG, Kaspersky…) sem abrir a tela dele:
   downloads e verificações rápida/completa com porcentagem real; verificação rápida automática
-  uma vez por dia; botão de download da versão mais recente no topo da página.
+  uma vez por dia; ameaças detectadas pelo Defender na aba Decisões (liberar ou apagar);
+  botão de download da versão mais recente no topo da página.
 - **1.8.1** — compatível com outros antivírus (Avast, AVG, Norton…): sem alarme falso de
   "Defender desligado", painel mostra o antivírus ativo, downloads conferidos pelo antivírus
   ativo e alerta se nenhum antivírus estiver ligado.

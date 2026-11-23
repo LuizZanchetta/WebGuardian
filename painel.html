@@ -650,7 +650,8 @@ const TIPOS = {
   Usuario:{nome:'Usuário novo',ic:'i-user',camada:1}, Administrador:{nome:'Novo administrador',ic:'i-key',camada:1},
   Servico:{nome:'Serviço novo',ic:'i-gear',camada:2}, Tarefa:{nome:'Tarefa agendada',ic:'i-clock',camada:2},
   Inicializacao:{nome:'Inicialização automática',ic:'i-rocket',camada:2},
-  Arquivo:{nome:'Download suspeito',ic:'i-download',camada:2}
+  Arquivo:{nome:'Download suspeito',ic:'i-download',camada:2},
+  Ameaca:{nome:'Ameaça detectada pelo Defender',ic:'i-shield-x',camada:2}
 };
 const CAMADA_NOME = {1:'Logons', 2:'Programas'};
 const LIBERAR = {
@@ -658,7 +659,8 @@ const LIBERAR = {
   Processo:'Descongela o programa e devolve o acesso dele à internet.', Usuario:'Reativa a conta de usuário.',
   Administrador:'Devolve essa conta ao grupo Administradores.', Servico:'Reativa o serviço como estava antes.',
   Tarefa:'Reativa a tarefa agendada.', Inicializacao:'Recoloca o programa para iniciar com o Windows.',
-  Arquivo:'Devolve o arquivo baixado para a pasta de onde ele saiu. Só libere se você confia na origem.'
+  Arquivo:'Devolve o arquivo baixado para a pasta de onde ele saiu. Só libere se você confia na origem.',
+  Ameaca:'Só libere se tiver CERTEZA de que é alarme falso. O Windows Defender passa a permitir essa ameaça neste PC e devolve o arquivo da quarentena dele para o lugar de antes.'
 };
 const APAGAR = {
   IP:'O endereço fica bloqueado para sempre no firewall.',
@@ -666,7 +668,8 @@ const APAGAR = {
   Usuario:'Exclui definitivamente essa conta de usuário.', Administrador:'A conta fica fora dos Administradores de forma definitiva.',
   Servico:'Remove o serviço do Windows e apaga o arquivo que ele executava.', Tarefa:'Exclui a tarefa agendada e apaga o arquivo que ela executava.',
   Inicializacao:'Apaga o arquivo que tentava iniciar com o Windows.',
-  Arquivo:'Apaga de vez o arquivo baixado que está na quarentena.'
+  Arquivo:'Apaga de vez o arquivo baixado que está na quarentena.',
+  Ameaca:'Se a ameaça ainda estiver ativa, o Defender a remove. Se já estiver na quarentena dele, ela continua presa lá, criptografada e sem poder rodar, até o Defender apagá-la sozinho.'
 };
 const CONFIRMA = {
   scanOffline:['Reiniciar e verificar offline?','O computador vai reiniciar agora e o Defender analisa tudo antes do Windows carregar, em cerca de 15 minutos. Salve seus arquivos antes.','Reiniciar agora',true,'i-rocket',{foco:'sim'}],
@@ -722,6 +725,7 @@ function rel(s) {
   const h = Math.round(min / 60); return h < 24 ? 'há ' + h + ' h' : curta(s);
 }
 function severidade(it) {
+  if (it.tipo === 'Ameaca' && /ATIVA/.test(it.motivo)) return ['Crítica', 'bad', 3];
   if (it.tipo === 'IP' && /BEM-SUCEDIDO/i.test(it.motivo)) return ['Crítica', 'bad', 3];
   if (it.tipo === 'IP') return ['Média', 'warn', 1];
   return ['Alta', 'bad', 2];
@@ -826,7 +830,7 @@ function renderFila(pend) {
   for (const id of ['nav-pend','mtab-pend']) { $(id).textContent = pend.length; $(id).hidden = !pend.length; }
   if (!pend.length) {
     const c = el('div','calm'), sq = el('div','sq'); sq.append(icon('i-check'));
-    const t = el('div'); t.append(el('b', null, 'Nada aguardando decisão'), el('p', null, 'Quando o WebGuardian isolar algo, o item aparece aqui com as opções liberar e apagar.'));
+    const t = el('div'); t.append(el('b', null, 'Nada aguardando decisão'), el('p', null, 'Quando o WebGuardian ou o antivírus isolar algo, o item aparece aqui com as opções liberar e apagar.'));
     c.append(sq, t); f.append(c); return;
   }
   const ord = [...pend].sort((a, b) => severidade(b)[2] - severidade(a)[2] || (data(b.quando) || 0) - (data(a.quando) || 0));
@@ -836,7 +840,7 @@ function renderFila(pend) {
     const pi = prioIcon(nv, tom); const piw = el('span'); piw.title = 'Severidade ' + sv.toLowerCase(); piw.append(pi);
     const body = el('div'), top = el('div','q-top');
     top.append(el('span','q-id','#' + it.id), el('span','q-title', tp.nome), badge('Severidade ' + sv.toLowerCase(), tom),
-               el('span','q-meta', (CAMADA_NOME[tp.camada] ? CAMADA_NOME[tp.camada] + ' · ' : '') + 'isolado'));
+               el('span','q-meta', (CAMADA_NOME[tp.camada] ? CAMADA_NOME[tp.camada] + ' · ' : '') + (it.tipo === 'Ameaca' ? (/ATIVA/.test(it.motivo) ? 'ativa' : 'neutralizada pelo Defender') : 'isolado')));
     body.append(top, el('div','q-alvo', it.alvo), el('p','q-why', it.motivo));
     const acts = el('div','q-acts'), tm = el('time','q-time', rel(it.quando)); tm.title = curta(it.quando);
     const bl = el('button','btn'); bl.append(icon('i-undo'), 'Liberar');

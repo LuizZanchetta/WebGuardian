@@ -469,6 +469,56 @@ function Test-DetectadoPeloDefender([string]$Arq, [datetime]$Desde) {
     } catch { return $false }
 }
 
+# ---------- Ameaças que o Defender detecta também viram DECISÕES no painel (liberar ou apagar) ----------
+# Antes elas só apareciam como "neutralizada" na aba Defender: decidir exigia abrir a Segurança do Windows.
+function Get-ArquivosDeteccao($Det) {
+    @(@($Det.Resources) | Where-Object { "$_" -like 'file:_*' } | ForEach-Object { "$_".Substring(6) })
+}
+function Get-TextoStatusDefender([int]$Status) {
+    switch ($Status) {
+        2       { 'limpou o arquivo' }
+        3       { 'colocou o arquivo na quarentena dele' }
+        4       { 'removeu o arquivo' }
+        6       { 'bloqueou o arquivo' }
+        { $_ -in 102, 103, 107 } { 'tentou neutralizar e FALHOU: ameaça ATIVA' }
+        default { 'ainda NÃO neutralizou: ameaça ATIVA' }
+    }
+}
+function Sync-DecisoesDefender {
+    # Detecções com arquivo dos últimos 7 dias que ainda não viraram decisão (uma por ameaça + arquivo)
+    $corte = (Get-Date).AddDays(-7)
+    if (Test-Path $ArqAmeacasOcultas) { try { $c = [datetime]::ParseExact((Get-Content $ArqAmeacasOcultas -Raw).Trim(), 'yyyy-MM-dd HH:mm:ss', $null); if ($c -gt $corte) { $corte = $c } } catch { } }
+    $dets = @(Get-MpThreatDetection -ErrorAction Stop | Where-Object { $_.InitialDetectionTime -gt $corte -and [int]$_.ThreatStatusID -ne 5 -and @(Get-ArquivosDeteccao $_).Count })
+    if (-not $dets.Count) { return 0 }
+    $itens = @(Get-Quarentena)
+    $conhecidos = @{}
+    foreach ($i in @($itens | Where-Object Tipo -eq 'Ameaca')) { foreach ($x in @($i.Desfazer.Deteccoes)) { $conhecidos["$x"] = $true } }
+    $novos = @($dets | Where-Object { -not $conhecidos["$($_.DetectionID)"] })
+    if (-not $novos.Count) { return 0 }
+    $nomes = @{}; Get-MpThreat -ErrorAction SilentlyContinue | ForEach-Object { $nomes["$($_.ThreatID)"] = "$($_.ThreatName)" }
+    $criados = 0
+    foreach ($g in @($novos | Group-Object { "$($_.ThreatID)|" + ((Get-ArquivosDeteccao $_) -join ', ') })) {
+        $ids = @($g.Group | ForEach-Object { "$($_.DetectionID)" })
+        $pend = @($itens | Where-Object { $_.Tipo -eq 'Ameaca' -and $_.Estado -eq 'ISOLADO' -and "$($_.Desfazer.Chave)" -eq $g.Name })
+        if ($pend.Count) { $pend[0].Desfazer.Deteccoes = @(@($pend[0].Desfazer.Deteccoes) + $ids); continue }   # mesma ameaça, mesmo arquivo
+        $ult = $g.Group | Sort-Object InitialDetectionTime -Descending | Select-Object -First 1
+        $nome = $nomes["$($ult.ThreatID)"]; if (-not $nome) { $nome = "ameaca $($ult.ThreatID)" }
+        $arqs = @(Get-ArquivosDeteccao $ult)
+        $id = 1; if ($itens.Count) { $id = ([int]($itens | Measure-Object Id -Maximum).Maximum) + 1 }
+        $motivo = "O Windows Defender detectou $nome e $(Get-TextoStatusDefender ([int]$ult.ThreatStatusID))"
+        $itens += [pscustomobject]@{
+            Id = $id; Tipo = 'Ameaca'; Alvo = ($arqs -join ', '); Motivo = $motivo
+            Quando = $ult.InitialDetectionTime.ToString('yyyy-MM-dd HH:mm:ss'); Estado = 'ISOLADO'
+            Desfazer = @{ ThreatID = "$($ult.ThreatID)"; Nome = $nome; Arquivos = $arqs; Deteccoes = $ids; Chave = $g.Name; Status = [int]$ult.ThreatStatusID }
+        }
+        Write-Log 'ISOLADO' "#$id [Ameaca] $($arqs -join ', ') - $motivo"
+        $criados++
+    }
+    Save-Quarentena $itens
+    if ($criados) { Show-Alerta 'WebGuardian: decisao pendente' "O Defender detectou $criados ameaca(s). Decida no WebGuardian, aba Decisoes: liberar (era seguro) ou apagar." }
+    return $criados
+}
+
 # --------------------- Base de assinaturas do Defender sempre atualizada ---------------------
 $script:AtualizacaoDef = $null
 $script:ProximaAtualizacaoDef = (Get-Date).AddMinutes(2)
@@ -1103,6 +1153,18 @@ function Undo-Item($Item) {
                           # você decidiu liberar: o vigia de downloads não deve isolá-lo de novo
                           $it = Get-Item -LiteralPath $dest -ErrorAction SilentlyContinue
                           if ($it -and $script:DownloadsVistos) { $script:DownloadsVistos["$dest|$($it.Length)|$($it.LastWriteTimeUtc.Ticks)"] = $true } }
+        'Ameaca'        { # Você decidiu que era alarme falso: o Defender passa a PERMITIR essa ameaça neste PC
+                          # (como o "Permitir no dispositivo" da Segurança do Windows) e devolve o arquivo da quarentena dele
+                          Add-MpPreference -ThreatIDDefaultAction_Ids ([int64]$d.ThreatID) -ThreatIDDefaultAction_Actions Allow -ErrorAction Stop
+                          $volta = @()
+                          foreach ($a in @($d.Arquivos)) {
+                              if (-not $a -or (Test-Path -LiteralPath $a)) { continue }
+                              & $MpCmdRun -Restore -Name "$($d.Nome)" -FilePath "$a" 2>&1 | Out-Null
+                              if (-not (Test-Path -LiteralPath $a)) { & $MpCmdRun -Restore -Name "$($d.Nome)" 2>&1 | Out-Null }
+                              if (Test-Path -LiteralPath $a) { $volta += [IO.Path]::GetFileName($a) }
+                          }
+                          if ($volta.Count) { return "ameaca permitida no Defender e arquivo devolvido ($($volta -join ', '))" }
+                          return 'ameaca permitida no Defender (nao havia copia na quarentena para devolver)' }
     }
 }
 
@@ -1133,6 +1195,19 @@ function Remove-Ameaca($Item) {
                           return "tarefa excluida; $(Remove-ArquivoSeguro $d.Exe)" }
         'Inicializacao' { return "entrada ja removida; $(Remove-ArquivoSeguro (Get-ExeDeComando $d.Valor))" }
         'Arquivo'       { Remove-Item -LiteralPath $d.Guardado -Force -ErrorAction Stop; return "download suspeito apagado ($([IO.Path]::GetFileName($d.Original)))" }
+        'Ameaca'        { # Ameaça ATIVA: o Defender remove. Já na quarentena dele: fica presa lá, criptografada (inofensiva).
+                          $ativa = @(Get-MpThreat -ErrorAction SilentlyContinue | Where-Object { $_.IsActive -and "$($_.ThreatID)" -eq "$($d.ThreatID)" }).Count -gt 0
+                          if ($ativa) { Remove-MpThreat -ErrorAction SilentlyContinue }
+                          $extra = @()
+                          foreach ($a in @($d.Arquivos)) {
+                              if (-not $a -or -not (Test-Path -LiteralPath $a)) { continue }
+                              try { Start-MpScan -ScanType CustomScan -ScanPath $a -ErrorAction Stop } catch { }   # o Defender neutraliza o que sobrou
+                              if (Test-Path -LiteralPath $a) { $extra += (Remove-ArquivoSeguro $a) }
+                          }
+                          $txt = 'ameaca eliminada: fica presa na quarentena do Defender (criptografada, nao roda) ate ele apagar sozinho'
+                          if ($ativa) { $txt = 'ameaca ativa removida pelo Defender' }
+                          if ($extra.Count) { $txt += '; ' + ($extra -join '; ') }
+                          return $txt }
     }
     return 'nada a fazer'
 }
@@ -1144,7 +1219,8 @@ function Invoke-AcaoItem([string]$Acao, [string]$Id) {
         if (-not $alvoOk -or $i.Estado -ne 'ISOLADO') { continue }
         try {
             switch ($Acao) {
-                'liberar'   { Undo-Item $i; $i.Estado = 'LIBERADO'; $r = 'isolamento desfeito' }
+                'liberar'   { $u = @(Undo-Item $i) | Where-Object { $_ -is [string] } | Select-Object -Last 1
+                              $i.Estado = 'LIBERADO'; $r = 'isolamento desfeito'; if ($u) { $r = $u } }
                 'apagar'    { $r = Remove-Ameaca $i; $i.Estado = 'APAGADO' }
                 'confirmar' { $i.Estado = 'AMEACA CONFIRMADA'; $r = 'mantido isolado' }
             }
@@ -1525,9 +1601,11 @@ function Test-Defender {
             }
         } else { $script:AvisouDefenderOff = $false }
         foreach ($t in Get-MpThreatDetection -ErrorAction SilentlyContinue | Where-Object { $_.InitialDetectionTime -gt $script:UltimaChecagemDefender }) {
-            Test-Alerta 'Defender detectou ameaca' "$($t.Resources -join ', ')" "Acao: $($t.ActionSuccess) / ThreatID $($t.ThreatID)"
+            # Com arquivo: vira decisão (abaixo). Só na memória (AMSI, script bloqueado): não há arquivo para decidir, só alerta.
+            if (-not @(Get-ArquivosDeteccao $t).Count) { Test-Alerta 'Defender bloqueou ameaca' "$($t.Resources -join ', ')" "Bloqueada na memoria antes de rodar (ThreatID $($t.ThreatID))" }
         }
         $script:UltimaChecagemDefender = Get-Date
+        try { Sync-DecisoesDefender | Out-Null } catch { Write-Log 'INFO' "Erro ao trazer as deteccoes do Defender para as decisoes: $_" }
     } catch { }
 }
 
