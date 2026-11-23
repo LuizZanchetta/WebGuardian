@@ -1,0 +1,20 @@
+{
+  "produto": "WebGuardian",
+  "versao": "1.8.0",
+  "fonteOficial": "https://github.com/LuizZanchetta/WebGuardian",
+  "impressaoDigital": "WG-D0C5-ACA9-5777-6D53-ED11",
+  "assinadoEm": "2026-11-23 16:09",
+  "arquivos": {
+    "WebGuardian.ps1": "4b35e7516168b7c9f3b4c874103f1e17e47e7b6838da160488176c0ebba3c30a",
+    "painel.html": "3bba479ee1b6a047dea28d5bf7dd607973eb2ba7cead2627f8171265781019b3",
+    "INSTALAR WEBGUARDIAN.bat": "6d644298022d636c8b41bfa84a90cd737d264a7ea210a1ba5a086985a121e7d1",
+    "ATUALIZAR WEBGUARDIAN.bat": "c6d51d604ac67c941dd9269cebacb1414df67ca12fa0e63fa37b98e5e7588f6b",
+    "DESINSTALAR WEBGUARDIAN.bat": "1f7e167d818ba61dae20adb3397f106ec0c6e0d556aaa5ec85534d475e99d550",
+    "VERIFICAR AUTENTICIDADE.bat": "391012a93a922063102cd341c8e8341d6457e5d1c21ed543a5267e68ff44391a",
+    "app/WebGuardianApp.cs": "0afb0d0f4ba1ebcf4e324bb2c12037b51dea6cdea73ce3196f6041b286fecf7e",
+    "app/compilar.ps1": "182719326da62eab3e394f784010fc1b2901c531c42c1b55698ee214f6d6aae1",
+    "app/app.manifest": "04118c00329f9152adedf6f40727e6300152bc1b234f741bcb5ea5213289f42e",
+    "app/webguardian.ico": "703ef7fcb14b53fb8c7821a9e3d1b1e72b83cedc6d1561c083d4531f56975efb",
+    "ferramentas/assinar-versao.ps1": "045e4ec4cdfef250851fe8368d6b3d9db4862efcf72261c5fd3b19c73444e894"
+  }
+}

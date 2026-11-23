@@ -1,0 +1,14 @@
+# Scripts do Windows precisam de quebra de linha CRLF
+*.bat      text eol=crlf
+*.ps1      text eol=crlf
+*.cs       text eol=crlf
+*.manifest text eol=crlf
+*.html     text eol=crlf
+*.md       text eol=crlf
+
+# Assinatura oficial: guardada byte a byte, sem nenhuma conversão
+ASSINATURA/** -text -diff
+
+# Binários
+*.ico binary
+*.png binary

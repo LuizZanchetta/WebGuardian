@@ -1,0 +1,22 @@
+# O app é compilado na máquina de cada pessoa (app\compilar.ps1) — não publicar binários
+*.exe
+*.dll
+*.pdb
+
+# Backups e cópias locais
+*_backup.*
+*.bak
+*.tmp
+backup/
+
+# Dados de execução (ficam em C:\ProgramData\Guardiao, mas por garantia)
+guardiao.log
+quarentena.json
+config.json
+painel_ativo.json
+placas_desligadas.json
+
+# Sistema
+Thumbs.db
+desktop.ini
+.DS_Store
