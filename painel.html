@@ -482,7 +482,7 @@ td.dim{color:var(--ink-3)}
           </div>
           <div class="metrics">
             <a class="metric" href="#atividade"><div class="lab"><svg class="i"><use href="#i-pulse"/></svg>Monitor</div><div class="val" id="k1">—</div><div class="mfoot" id="k1f"></div></a>
-            <a class="metric" href="#defender"><div class="lab"><svg class="i"><use href="#i-shield"/></svg>Defender</div><div class="val" id="k2">—</div><div class="mfoot" id="k2f"></div></a>
+            <a class="metric" href="#defender"><div class="lab"><svg class="i"><use href="#i-shield"/></svg>Antivírus</div><div class="val" id="k2">—</div><div class="mfoot" id="k2f"></div></a>
             <a class="metric" href="#conexoes"><div class="lab"><svg class="i"><use href="#i-globe"/></svg>Conexões externas</div><div class="val" id="k3">—</div><div class="mfoot" id="k3f"></div></a>
             <a class="metric" href="#decisoes"><div class="lab"><svg class="i"><use href="#i-inbox"/></svg>Aguardando você</div><div class="val" id="k4">—</div><div class="mfoot" id="k4f"></div></a>
           </div>
@@ -505,7 +505,7 @@ td.dim{color:var(--ink-3)}
                 <a class="node n2" id="c2" href="#decisoes"><span class="ic"><svg class="i"><use href="#i-cpu"/></svg></span><span><b>Programas</b><span class="st">—</span></span></a>
                 <div class="hub"><div><svg class="i"><use href="#i-shield-ok"/></svg><small>WebGuardian</small></div></div>
                 <a class="node n3" id="c3" href="#conexoes"><span class="ic"><svg class="i"><use href="#i-globe"/></svg></span><span><b>Rede</b><span class="st">—</span></span></a>
-                <a class="node n4" id="c4" href="#defender"><span class="ic"><svg class="i"><use href="#i-shield"/></svg></span><span><b>Defender</b><span class="st">—</span></span></a>
+                <a class="node n4" id="c4" href="#defender"><span class="ic"><svg class="i"><use href="#i-shield"/></svg></span><span><b>Antivírus</b><span class="st">—</span></span></a>
               </div>
             </div>
           </section>
@@ -687,7 +687,7 @@ const ACENTOS = Object.entries({ Verificacao:'Verificação', verificacao:'verif
   ameaca:'ameaça', ameacas:'ameaças', AMEACA:'AMEAÇA', Concluida:'Concluída', ultima:'última', tipico:'típico', Ja:'Já', NAO:'NÃO',
   Previsao:'Previsão', previsao:'previsão', so:'só', Nao:'Não', automatica:'automática', Area:'Área',
   possivel:'possível', codigo:'código', Atualizacao:'Atualização', atualizacao:'atualização', automatica:'automática', padrao:'padrão',
-  nivel:'nível', mudanca:'mudança', usuario:'usuário', protecao:'proteção', apos:'após' }).map(([k, v]) => [new RegExp('\\b' + k + '\\b', 'g'), v]);
+  nivel:'nível', mudanca:'mudança', usuario:'usuário', protecao:'proteção', apos:'após', antivirus:'antivírus', propria:'própria' }).map(([k, v]) => [new RegExp('\\b' + k + '\\b', 'g'), v]);
 const acentuar = t => ACENTOS.reduce((s, [r, v]) => s.replace(r, v), String(t || ''));
 
 const $ = id => document.getElementById(id);
@@ -797,7 +797,8 @@ const DL_ESTADO = {
   baixando:         ['Baixando…', '', 'i-download'],
   isolado:          ['Isolado', 'bad', 'i-shield-x'],
   suspeito:         ['Suspeito', 'warn', 'i-alert'],
-  removido:         ['Removido', '', 'i-trash']
+  removido:         ['Removido', '', 'i-trash'],
+  'outro-av':       ['Sem bloqueio', 'ok', 'i-check']   // outro antivírus (Avast etc.) é o ativo e não bloqueou
 };
 function renderDownloads(ul, itens, vazio) {
   ul.replaceChildren();
@@ -851,7 +852,10 @@ function render(s) {
   ultimo = s;
   const q = list(s.quarentena), pend = q.filter(i => i.estado === 'ISOLADO'), hist = q.filter(i => i.estado !== 'ISOLADO');
   const d = s.defender || {}, mon = s.monitor || {}, cons = list(s.conexoes), susp = cons.filter(c => c.suspeito);
-  const desat = d.idadeAssinaturas > 2, hora = String(s.agora || '').slice(11, 16);
+  // Outro antivírus (Avast, AVG, Norton...) ligado: o Windows desliga o Defender e ele vira a proteção ativa do PC
+  const outro = (d.outro && d.outro.ligado && !d.ok) ? d.outro : null;
+  const prot = d.ok || !!outro, nomeAv = outro ? outro.nome : 'Defender';
+  const desat = outro ? !outro.emDia : d.idadeAssinaturas > 2, hora = String(s.agora || '').slice(11, 16);
   $('pc').textContent = s.computador || ''; $('offline').style.display = 'none';
   $('live-dot').className = 'dot beat'; $('live-txt').textContent = 'Ao vivo'; $('live-t').textContent = hora;
   $('foot-r').textContent = 'WebGuardian ' + (s.versao || '') + ' · ' + (s.computador || '') + ' · atualizado às ' + String(s.agora || '').slice(11, 19);
@@ -875,12 +879,13 @@ function render(s) {
   let tom = 'ok', tg = 'Protegido', h1, lead, ic = 'i-shield-ok';
   if (s.redeIsolada) { tom = 'bad'; tg = 'Isolamento ativo'; ic = 'i-unplug'; h1 = 'Computador desconectado da internet'; lead = 'Nenhuma conexão entra ou sai até você reconectar. As decisões pendentes continuam valendo.'; }
   else if (pend.length) { tom = 'bad'; tg = 'Ação necessária'; ic = 'i-shield-x'; h1 = pend.length === 1 ? '1 item isolado espera sua decisão' : pend.length + ' itens isolados esperam sua decisão'; lead = 'O WebGuardian bloqueou o que parecia acesso indevido. Revise cada item abaixo e escolha liberar ou apagar.'; }
-  else if (!d.ok) { tom = 'warn'; tg = 'Atenção'; ic = 'i-alert'; h1 = 'O Windows Defender está desligado'; lead = 'Religue a proteção em tempo real em Segurança do Windows › Proteção contra vírus e ameaças.'; }
+  else if (!prot && d.outro) { tom = 'bad'; tg = 'Atenção'; ic = 'i-alert'; h1 = 'Nenhum antivírus está ligado'; lead = 'O ' + d.outro.nome + ' e o Windows Defender estão desligados. Religue o ' + d.outro.nome + ' ou a proteção em Segurança do Windows.'; }
+  else if (!prot) { tom = 'warn'; tg = 'Atenção'; ic = 'i-alert'; h1 = 'O Windows Defender está desligado'; lead = 'Religue a proteção em tempo real em Segurança do Windows › Proteção contra vírus e ameaças.'; }
   else if (!mon.rodando) { tom = 'warn'; tg = 'Atenção'; ic = 'i-alert'; h1 = 'O monitor do WebGuardian está parado'; lead = 'O WebGuardian não está vigiando agora. Inicie o monitor para voltar a proteger o PC.'; }
-  else { h1 = 'Seu computador está protegido'; lead = 'Nenhum acesso indevido pendente. O WebGuardian e o Defender estão vigiando logons, programas e a rede.'; }
+  else { h1 = 'Seu computador está protegido'; lead = 'Nenhum acesso indevido pendente. O WebGuardian e o ' + nomeAv + ' estão vigiando logons, programas e a rede.'; }
   $('state').className = 'state ' + tom; $('state-ic').replaceChildren(icon(ic));
   const sb = $('state-badge'); sb.className = 'badge ' + tom; sb.replaceChildren(el('span','dot'), tg);
-  $('state-when').textContent = 'Última verificação do Defender: ' + (d.ultimaRapida ? curta(d.ultimaRapida).toLowerCase() : 'nunca');
+  $('state-when').textContent = outro ? 'Antivírus ativo deste PC: ' + outro.nome : 'Última verificação do Defender: ' + (d.ultimaRapida ? curta(d.ultimaRapida).toLowerCase() : 'nunca');
   $('estado').textContent = h1; $('lead').textContent = lead;
   document.title = (pend.length ? '(' + pend.length + ') ' : '') + 'WebGuardian · ' + tg;
 
@@ -888,6 +893,7 @@ function render(s) {
   if (s.redeIsolada) setBtn(bm, 'primary', 'restaurarRede', 'i-plug', 'Reconectar à internet');
   else if (pend.length) { setBtn(bm, 'primary', null, 'i-inbox', 'Revisar decisões'); bm.onclick = () => ir('decisoes'); }
   else if (!mon.rodando && mon.instalado) setBtn(bm, 'primary', 'iniciarMonitor', 'i-pulse', 'Iniciar monitor');
+  else if (outro) { setBtn(bm, 'primary', null, 'i-download', 'Ver downloads conferidos'); bm.onclick = () => ir('defender'); }
   else setBtn(bm, 'primary', 'scanRapido', 'i-scan', 'Fazer verificação rápida');
   $('b-rede').style.display = s.redeIsolada ? 'none' : '';
   // Botão de emergência da rede alterna entre desconectar e reconectar
@@ -901,8 +907,9 @@ function render(s) {
   // Indicadores
   $('k1').textContent = mon.rodando ? 'Ativo' : 'Parado';
   foot('k1f', mon.rodando ? 'ok' : 'bad', mon.instalado ? 'Inicia com o Windows' : 'Não instalado');
-  $('k2').textContent = d.ok ? (desat ? 'Desatualizado' : 'Protegendo') : 'Desligado';
-  foot('k2f', d.ok ? (desat ? 'warn' : 'ok') : 'bad', d.assinaturas ? 'Assinaturas de ' + curta(d.assinaturas).toLowerCase() : 'Sem dados de assinatura');
+  $('k2').textContent = prot ? (desat ? 'Desatualizado' : 'Protegendo') : 'Desligado';
+  foot('k2f', prot ? (desat ? 'warn' : 'ok') : 'bad', outro ? outro.nome + (desat ? ' · base desatualizada' : ' · tempo real')
+    : d.assinaturas ? 'Defender · assinaturas de ' + curta(d.assinaturas).toLowerCase() : 'Sem dados de assinatura');
   $('k3').textContent = s.redeIsolada ? 'Isolada' : String(cons.length);
   foot('k3f', s.redeIsolada ? 'bad' : (susp.length ? 'warn' : 'ok'), s.redeIsolada ? 'Wi-Fi e cabo desligados' : (susp.length ? plural(susp.length, 'suspeita', 'suspeitas') : 'Nenhuma suspeita'));
   $('k4').textContent = String(pend.length);
@@ -929,7 +936,7 @@ function render(s) {
   } else sc.style.display = 'none';
   const varrendo = !!(vr && vr.ativo);
   document.querySelectorAll('[data-acao="scanRapido"],[data-acao="scanCompleto"]').forEach(b => { b.disabled = varrendo; });
-  $('e-scan-s').textContent = varrendo ? 'Em andamento: ' + vr.pct + '% (estimado)' : 'Defender procura ameaças agora';
+  $('e-scan-s').textContent = varrendo ? 'Em andamento: ' + vr.pct + '% (estimado)' : outro ? 'Faça pela tela do ' + outro.nome : 'Defender procura ameaças agora';
 
   // Downloads verificados
   const dls = list(s.downloads);
@@ -944,8 +951,8 @@ function render(s) {
   camada(1, pendL ? 'bad' : 'ok', pendL ? plural(pendL, 'isolado', 'isolados') : 'Vigiando');
   camada(2, pendP ? 'bad' : (susp.length ? 'warn' : 'ok'), pendP ? plural(pendP, 'isolado', 'isolados') : (susp.length ? plural(susp.length, 'suspeito', 'suspeitos') : 'Vigiando'));
   camada(3, s.redeIsolada ? 'bad' : 'ok', s.redeIsolada ? 'Desligada' : 'Conectada');
-  camada(4, d.ok ? (desat ? 'warn' : 'ok') : 'bad', d.ok ? (desat ? 'Desatualizado' : 'Ativo') : 'Desligado');
-  const ruins = [pendL, pendP || susp.length, s.redeIsolada, !d.ok || desat].filter(Boolean).length;
+  camada(4, prot ? (desat ? 'warn' : 'ok') : 'bad', prot ? (desat ? 'Desatualizado' : (outro ? outro.nome : 'Defender ativo')) : 'Desligado');
+  const ruins = [pendL, pendP || susp.length, s.redeIsolada, !prot || desat].filter(Boolean).length;
   $('cam-r').textContent = ruins ? ruins + ' de 4 pedem atenção' : '4 de 4 em ordem';
 
   renderFila(pend);
@@ -987,25 +994,37 @@ function render(s) {
   if (!vis.length) emptyRow(tb, 5, filtro === 'susp' ? 'Nenhuma conexão suspeita.' : 'Nenhuma conexão externa.');
 
   // Defender
-  $('def-badge').replaceChildren(badge(d.ok ? (desat ? 'Desatualizado' : 'Ativo') : 'Desligado', d.ok ? (desat ? 'warn' : 'ok') : 'bad', true));
+  $('def-badge').replaceChildren(outro ? badge('Substituído pelo ' + outro.nome, null, true)
+    : badge(d.ok ? (desat ? 'Desatualizado' : 'Ativo') : 'Desligado', d.ok ? (desat ? 'warn' : 'ok') : 'bad', true));
   const dl = $('def-dl'); dl.replaceChildren();
   const linha = (k, v, tm) => { const w = el('div'), dd = el('dd'); if (tm) dd.append(badge(v, tm)); else dd.textContent = v; w.append(el('dt', null, k), dd); dl.append(w); };
-  linha('Proteção em tempo real', d.tempoReal ? 'Ativa' : 'Desligada', d.tempoReal ? 'ok' : 'bad');
-  linha('Antivírus', d.antivirus ? 'Ativo' : 'Desligado', d.antivirus ? 'ok' : 'bad');
-  linha('Assinaturas', d.assinaturas ? curta(d.assinaturas) : '—', desat ? 'warn' : null);
-  linha('Última verificação rápida', d.ultimaRapida ? curta(d.ultimaRapida) : 'Nunca');
-  linha('Última verificação completa', d.ultimaCompleta ? curta(d.ultimaCompleta) : 'Nunca', d.ultimaCompleta ? null : 'warn');
+  if (d.outro) linha('Outro antivírus no PC', d.outro.ligado ? d.outro.nome + (d.outro.emDia ? '' : ' · base desatualizada') : d.outro.nome + ' desligado',
+    d.outro.ligado ? (d.outro.emDia ? 'ok' : 'warn') : 'bad');
+  if (outro) {
+    // Normal: o Windows desliga o Defender enquanto outro antivírus está ligado
+    linha('Proteção em tempo real do Defender', 'Desligada pelo Windows: o ' + outro.nome + ' está no lugar');
+  } else {
+    linha('Proteção em tempo real', d.tempoReal ? 'Ativa' : 'Desligada', d.tempoReal ? 'ok' : 'bad');
+    linha('Antivírus', d.antivirus ? 'Ativo' : 'Desligado', d.antivirus ? 'ok' : 'bad');
+    linha('Assinaturas', d.assinaturas ? curta(d.assinaturas) : '—', desat ? 'warn' : null);
+  }
+  if (!outro) {   // com outro antivírus as verificações são feitas pela tela dele
+    linha('Última verificação rápida', d.ultimaRapida ? curta(d.ultimaRapida) : 'Nunca');
+    linha('Última verificação completa', d.ultimaCompleta ? curta(d.ultimaCompleta) : 'Nunca', d.ultimaCompleta ? null : 'warn');
+  }
   // Base de dados de ameaças (assinaturas do Defender) e proteções extras
   const base = s.baseAtualizando ? 'Atualizando agora…' : (d.versaoBase ? 'v' + d.versaoBase + ' · há ' + (d.horasBase < 1 ? 'menos de 1 h' : Math.round(d.horasBase) + ' h') : '—');
-  linha('Base de ameaças (atualiza a cada 3 h)', base, s.baseAtualizando ? null : d.horasBase > 24 ? 'warn' : null);
+  if (outro) linha('Base de ameaças do Defender', 'Parada enquanto o ' + outro.nome + ' estiver ligado (ele atualiza a dele)');
+  else linha('Base de ameaças (atualiza a cada 3 h)', base, s.baseAtualizando ? null : d.horasBase > 24 ? 'warn' : null);
   const linhaBotao = (k, txt, tom, acao, id, rotulo) => {
     const w = el('div'), dd = el('dd'); dd.append(badge(txt, tom));
     const b = el('button', 'btn', rotulo); b.dataset.acao = acao; b.dataset.id = id; dd.append(b);
     w.append(el('dt', null, k), dd); dl.append(w);
   };
-  if (d.pua !== undefined) linhaBotao('Bloqueio de apps indesejados', d.pua === 1 ? 'Bloqueando' : d.pua === 2 ? 'Só registra' : 'Desligado',
+  // Proteções extras são do Defender: com outro antivírus no lugar elas não têm efeito
+  if (d.pua !== undefined && !outro) linhaBotao('Bloqueio de apps indesejados', d.pua === 1 ? 'Bloqueando' : d.pua === 2 ? 'Só registra' : 'Desligado',
     d.pua === 1 ? 'ok' : 'warn', 'pua', d.pua === 1 ? 'auditoria' : 'ligar', d.pua === 1 ? 'Voltar ao padrão' : 'Ligar');
-  if (d.nuvemNivel !== undefined) linhaBotao('Bloqueio na nuvem', d.nuvem === 0 ? 'Nuvem desligada' : d.nuvemNivel >= 2 ? 'Alto' : 'Padrão',
+  if (d.nuvemNivel !== undefined && !outro) linhaBotao('Bloqueio na nuvem', d.nuvem === 0 ? 'Nuvem desligada' : d.nuvemNivel >= 2 ? 'Alto' : 'Padrão',
     d.nuvemNivel >= 2 ? 'ok' : null, 'nuvem', d.nuvemNivel >= 2 ? 'padrao' : 'alto', d.nuvemNivel >= 2 ? 'Voltar ao padrão' : 'Usar nível alto');
   const ta = $('ameacas'), am = list(d.ameacas); ta.replaceChildren();
   $('n-amea').textContent = am.length; $('n-amea').className = 'badge' + (am.some(x => !x.resolvido) ? ' bad' : '');

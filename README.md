@@ -8,7 +8,7 @@ com o Windows Defender.
 > **Tudo roda só no seu computador.** Não há servidor, conta, nem envio de dados seus para a
 > internet. Cada pessoa que instala tem o seu WebGuardian independente.
 
-**Versão atual: 1.8.0**
+**Versão atual: 1.8.1**
 
 > [!IMPORTANT]
 > **Versão oficial:** só existe uma fonte oficial do WebGuardian:
@@ -76,6 +76,25 @@ A lista de downloads conferidos pode ser limpa a qualquer momento (**Limpar list
   escondidas em instaladores (por padrão o Windows só registra).
 - **Bloqueio na nuvem em nível alto** — o Defender consulta a nuvem da Microsoft de forma mais
   rigorosa e bloqueia arquivos desconhecidos suspeitos no primeiro contato.
+
+### Funciona com outros antivírus (Avast, AVG, Norton, Kaspersky…)
+Quando outro antivírus está ligado, o **próprio Windows desliga** a proteção em tempo real do
+Defender. Isso é normal, e o WebGuardian reconhece a situação:
+- não dá alarme de "Defender desligado": mostra **qual antivírus protege o PC**;
+- avisa se **nenhum** antivírus estiver ligado, ou se a base do outro antivírus estiver desatualizada;
+- nos downloads, quem confere o arquivo é o outro antivírus, em tempo real. O WebGuardian mostra
+  **Sem bloqueio** (em vez de "Limpo", porque não tem como perguntar o resultado ao outro
+  antivírus) e continua aplicando as **regras contra golpes** e a conferência de **assinatura digital**;
+- um programa que some logo depois de baixado aparece como "provavelmente bloqueado" pelo outro antivírus;
+- verificações rápida e completa ficam por conta da tela do outro antivírus.
+
+> **Alarme falso do outro antivírus:** alguns antivírus (por exemplo, a detecção por
+> comportamento do Avast, "IDP.*") podem desconfiar do WebGuardian. Ele faz coisas que um
+> programa de proteção precisa fazer e que um vírus também faria (rodar escondido como
+> Administrador, congelar programas, mexer no firewall), e o app não tem assinatura digital de
+> empresa. Confira a cópia com `VERIFICAR AUTENTICIDADE.bat`; sendo a versão oficial, restaure da
+> quarentena, adicione `C:\ProgramData\Guardiao` às exceções e, se puder, reporte o alarme falso
+> ao fabricante do antivírus.
 
 ### Como ele separa ameaça real de alarme falso
 O WebGuardian julga pela **assinatura digital** do que vai rodar (nome e pasta podem ser
@@ -301,6 +320,9 @@ powershell -ExecutionPolicy Bypass -File app\compilar.ps1
 
 ## Histórico de versões
 
+- **1.8.1** — compatível com outros antivírus (Avast, AVG, Norton…): sem alarme falso de
+  "Defender desligado", painel mostra o antivírus ativo, downloads conferidos pelo antivírus
+  ativo e alerta se nenhum antivírus estiver ligado.
 - **1.8.0** — primeira versão pública: **assinatura digital oficial** com conferência de
   autenticidade (`VERIFICAR AUTENTICIDADE.bat`, na instalação, na atualização e a cada 10 min
   nos arquivos instalados); selo de versão oficial no painel.

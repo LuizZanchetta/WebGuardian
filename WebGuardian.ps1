@@ -60,7 +60,9 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
-$VersaoGuardiao = '1.8.0'   # 1.8.0: primeira versão pública: assinatura digital oficial + conferência de autenticidade
+$VersaoGuardiao = '1.8.1'   # 1.8.1: compatível com outros antivírus (Avast, AVG, Norton...): sem alarme falso de
+                            #        "Defender desligado", downloads conferidos pelo antivírus ativo
+                            # 1.8.0: primeira versão pública: assinatura digital oficial + conferência de autenticidade
                             #        (na instalação, na atualização e a cada 10 min nos arquivos instalados)
                             # 1.7.1: atividade por sessão (arquivada a cada PC ligado) + registro de entradas no Windows;
                             #        limpar lista de ameaças detectadas e de histórico
@@ -472,6 +474,8 @@ $script:ProximaAtualizacaoDef = (Get-Date).AddMinutes(2)
 function Start-AtualizacaoDefender([string]$Motivo) {
     $a = $script:AtualizacaoDef
     if ($a -and -not $a.Fim) { return 'A base do Defender ja esta sendo atualizada.' }
+    $outro = Get-AntivirusSubstituto
+    if ($outro) { return "O antivírus ativo deste PC é o $outro, que atualiza a própria base sozinho. A base do Defender fica parada enquanto ele estiver ligado." }
     $antes = ''; try { $antes = (Get-MpComputerStatus -ErrorAction Stop).AntivirusSignatureVersion } catch { }
     try { $p = Start-Process -FilePath $MpCmdRun -ArgumentList '-SignatureUpdate' -WindowStyle Hidden -PassThru -ErrorAction Stop }
     catch { Write-Log 'ALERTA' "Nao foi possivel atualizar a base do Defender: $_"; return 'Nao foi possivel iniciar a atualizacao da base do Defender.' }
@@ -493,13 +497,51 @@ function Step-AtualizacaoDefender {
     }
     if ((Get-Date) -ge $script:ProximaAtualizacaoDef) {
         $script:ProximaAtualizacaoDef = (Get-Date).AddHours(3)
-        Start-AtualizacaoDefender 'automatica, a cada 3 horas' | Out-Null
+        if (-not (Get-AntivirusSubstituto)) { Start-AtualizacaoDefender 'automatica, a cada 3 horas' | Out-Null }   # com outro antivírus: ele cuida da base dele
     }
 }
 
 function Test-BaseDefenderVelha {
     # Base com mais de 3 horas? (atualiza antes de confiar só nela para um programa baixado)
     try { return ((Get-Date) - (Get-MpComputerStatus -ErrorAction Stop).AntivirusSignatureLastUpdated).TotalHours -gt 3 } catch { return $false }
+}
+
+# ------------- Outro antivírus no PC (Avast, AVG, Norton, Kaspersky, McAfee, ESET...) -------------
+# Quando outro antivírus está ligado, o PRÓPRIO Windows desliga a proteção em tempo real do Defender.
+# Isso é normal e não é ataque: o WebGuardian passa a tratar o outro antivírus como a proteção do PC.
+function ConvertFrom-EstadoAntivirus([int]$Estado) {
+    # productState da Central de Segurança: 2º byte = ligado (0x10/0x11), 3º byte = base em dia (0x00)
+    $hex = '{0:X6}' -f $Estado
+    return @{ Ligado = (@('10', '11') -contains $hex.Substring(2, 2)); EmDia = ($hex.Substring(4, 2) -eq '00') }
+}
+function Get-AntivirusRegistrados {
+    $lista = @()
+    try {
+        foreach ($p in @(Get-CimInstance -Namespace 'root/SecurityCenter2' -ClassName AntiVirusProduct -ErrorAction Stop)) {
+            $e = ConvertFrom-EstadoAntivirus ([int]$p.productState)
+            $lista += [pscustomobject]@{ Nome = "$($p.displayName)"; Ligado = $e.Ligado; EmDia = $e.EmDia
+                                         Microsoft = ("$($p.displayName)" -match 'Windows Defender|Microsoft Defender') }
+        }
+    } catch { }
+    return $lista
+}
+function Get-OutroAntivirus {
+    # Antivírus de outra empresa registrado no Windows (o ligado primeiro), ou $null. Consulta a cada 60 s.
+    $c = $script:OutroAV
+    if ($c -and ((Get-Date) - $c.Quando).TotalSeconds -lt 60) { return $c.Valor }
+    $outros = @(Get-AntivirusRegistrados | Where-Object { -not $_.Microsoft } | Sort-Object @{ Expression = 'Ligado'; Descending = $true })
+    $v = $null; if ($outros.Count) { $v = $outros[0] }
+    $script:OutroAV = @{ Quando = Get-Date; Valor = $v }
+    return $v
+}
+function Test-DefenderAtivo {
+    try { $st = Get-MpComputerStatus -ErrorAction Stop; return ([bool]$st.RealTimeProtectionEnabled -and [bool]$st.AntivirusEnabled) } catch { return $false }
+}
+function Get-AntivirusSubstituto {
+    # Nome do outro antivírus quando ELE é a proteção ativa (Defender desligado por causa dele); senão $null
+    $o = Get-OutroAntivirus
+    if ($o -and $o.Ligado -and -not (Test-DefenderAtivo)) { return $o.Nome }
+    return $null
 }
 
 function Step-Downloads {
@@ -520,12 +562,18 @@ function Step-Downloads {
         if (-not $item) {
             # Sumiu antes de terminar: o Defender pode tê-lo bloqueado em tempo real (registra; senão ignora)
             $script:FilaDownloads.Remove($arq)
+            $nm = [IO.Path]::GetFileName($arq)
             if (-not $f.SoComMarca -and (Test-DetectadoPeloDefender $arq $f.Desde.AddMinutes(-5))) {
-                $nm = [IO.Path]::GetFileName($arq)
                 Write-Log 'CRITICO' "Download com AMEACA bloqueado pelo Defender em tempo real: $nm"
                 Show-Alerta 'WebGuardian: download perigoso' "$nm`nO Defender bloqueou o arquivo assim que ele foi gravado."
                 Add-DownloadRecente @{ quando = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); nome = $nm; caminho = $arq; origem = ''; tamanho = [int64]0
                                        resultado = 'ameaca'; detalhe = 'Bloqueado pelo Defender em tempo real, assim que foi gravado' }
+            } elseif (-not $f.SoComMarca -and ($ExtExecutaveis -contains [IO.Path]::GetExtension($arq).ToLower()) -and ($outroAv = Get-AntivirusSubstituto)) {
+                # Com outro antivírus não dá para consultar as detecções dele: um programa que some logo depois de
+                # baixado quase sempre foi bloqueado por ele (o WebGuardian registra, sem afirmar o motivo)
+                Write-Log 'ALERTA' "[Download] $nm sumiu logo depois de baixado: provavelmente o $outroAv bloqueou ou mandou para a quarentena dele"
+                Add-DownloadRecente @{ quando = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); nome = $nm; caminho = $arq; origem = ''; tamanho = [int64]0
+                                       resultado = 'removido'; detalhe = "Sumiu logo depois de baixado: provavelmente bloqueado pelo $outroAv (veja a quarentena dele)" }
             }
             continue
         }
@@ -558,14 +606,20 @@ function Step-Downloads {
                                    tamanho = [int64]$item.Length; resultado = $res; detalhe = $regra.Motivo }
             continue
         }
-        # Programa baixado com a base do Defender velha: pede atualização (a verificação segue já)
-        if (($ExtExecutaveis -contains [IO.Path]::GetExtension($arq).ToLower()) -and (Test-BaseDefenderVelha)) { Start-AtualizacaoDefender 'programa baixado com a base desatualizada' | Out-Null }
-        # Verificação do arquivo pelo Defender (se achar ameaça, o próprio Defender bloqueia/remove)
         $p = $null
-        try { $p = Start-Process -FilePath $MpCmdRun -ArgumentList @('-Scan', '-ScanType', '3', '-File', "`"$arq`"") -WindowStyle Hidden -PassThru -ErrorAction Stop }
-        catch { Write-Log 'INFO' "Nao foi possivel chamar o Defender para $($item.Name): $_" }
+        $outroAv = Get-AntivirusSubstituto
+        if (-not $outroAv) {
+            # Programa baixado com a base do Defender velha: pede atualização (a verificação segue já)
+            if (($ExtExecutaveis -contains [IO.Path]::GetExtension($arq).ToLower()) -and (Test-BaseDefenderVelha)) { Start-AtualizacaoDefender 'programa baixado com a base desatualizada' | Out-Null }
+            # Verificação do arquivo pelo Defender (se achar ameaça, o próprio Defender bloqueia/remove)
+            try { $p = Start-Process -FilePath $MpCmdRun -ArgumentList @('-Scan', '-ScanType', '3', '-File', "`"$arq`"") -WindowStyle Hidden -PassThru -ErrorAction Stop }
+            catch { Write-Log 'INFO' "Nao foi possivel chamar o Defender para $($item.Name): $_" }
+        }
+        # Com outro antivírus ligado o Defender fica desligado pelo Windows e não verifica: quem confere o arquivo
+        # é o outro antivírus, em tempo real (ao gravar e ao abrir). O WebGuardian segue com as regras contra golpes
+        # e a conferência da assinatura digital.
         $script:CacheEditor.Remove($arq)
-        $script:ScansDownload += @{ Arquivo = $arq; Nome = $item.Name; Tamanho = $item.Length; Origem = $origem; Processo = $p; Inicio = Get-Date; Regra = $regra; Criado = $item.CreationTime }
+        $script:ScansDownload += @{ Arquivo = $arq; Nome = $item.Name; Tamanho = $item.Length; Origem = $origem; Processo = $p; Inicio = Get-Date; Regra = $regra; Criado = $item.CreationTime; OutroAV = $outroAv }
     }
     # 3) verificações terminadas -> resultado
     $ainda = @()
@@ -576,16 +630,23 @@ function Step-Downloads {
         $deOnde = ''; if ($s.Origem) { $deOnde = " (baixado de $($s.Origem))" }
         $ext = [IO.Path]::GetExtension($s.Arquivo).ToLower()
         $res = 'limpo'; $det = 'Nenhuma ameaca encontrada pelo Defender'
+        $av = $s.OutroAV; $quemVerifica = 'Defender'
+        if ($av) {
+            # O outro antivírus confere em tempo real; não há como perguntar o resultado a ele (sem afirmar "limpo")
+            $codigo = 0; $quemVerifica = $av
+            $res = 'outro-av'; $det = "Não bloqueado pelo $av, o antivírus ativo deste PC (ele confere o arquivo ao gravar e ao abrir)"
+        }
         # Ameaça se a verificação achou, OU se a proteção em tempo real do Defender já detectou este arquivo desde que ele
         # foi criado (nesse caso a verificação manual pode responder "nada encontrado" porque o Defender já está cuidando dele)
         $desdeCriacao = $s.Inicio; if ($s.Criado -and $s.Criado -lt $s.Inicio) { $desdeCriacao = $s.Criado }
-        $ameaca = ($codigo -eq 2) -or (Test-DetectadoPeloDefender $s.Arquivo $desdeCriacao)
+        $ameaca = (-not $av) -and (($codigo -eq 2) -or (Test-DetectadoPeloDefender $s.Arquivo $desdeCriacao))
         if ($ameaca) {
             $res = 'ameaca'; $det = 'O Defender encontrou uma ameaca e bloqueou o arquivo'
             Write-Log 'CRITICO' "Download com AMEACA bloqueado pelo Defender: $($s.Nome)$deOnde"
             Show-Alerta 'WebGuardian: download perigoso' "$($s.Nome)$deOnde`nO Defender bloqueou o arquivo."
         } elseif (-not $existe) {
             $res = 'removido'; $det = 'O arquivo foi apagado ou movido antes de a verificação terminar'
+            if ($av) { $det = "Sumiu logo depois de baixado: provavelmente bloqueado pelo $av (veja a quarentena dele)" }
             Write-Log 'INFO' "Download $($s.Nome)$deOnde - removido antes de terminar a verificacao"
         } elseif ($codigo -ne 0) {
             # O Defender não conseguiu verificar (desligado, ocupado, arquivo protegido...): nunca chamar de "limpo"
@@ -594,6 +655,7 @@ function Step-Downloads {
             Show-Alerta 'WebGuardian: download nao verificado' "$($s.Nome)$deOnde`nO Defender não conseguiu verificar este arquivo."
         } elseif ($s.Regra) {
             $res = 'suspeito'; $det = "$($s.Regra.Motivo). O Defender não achou ameaça conhecida."
+            if ($av) { $det = "$($s.Regra.Motivo). O $av não bloqueou." }
             Write-Log 'ALERTA' "[Download] $($s.Nome)$deOnde - $($s.Regra.Motivo)"
             Show-Alerta 'WebGuardian: download suspeito' "$($s.Nome)$deOnde`nTipo de arquivo comum em golpes: não abra se não esperava."
         } elseif ($ExtExecutaveis -contains $ext) {
@@ -601,14 +663,17 @@ function Step-Downloads {
             if ($ed -eq 'microsoft' -or $ed -like 'assinado:*') {
                 $quem = 'Microsoft'; if ($ed -like 'assinado:*') { $quem = $ed.Substring(9) }
                 $det = "Instalador/programa assinado por $quem; sem ameacas"
-                Write-Log 'INFO' "Download verificado: $($s.Nome)$deOnde - limpo, assinado por $quem"
+                if ($av) { $det = "Instalador/programa assinado por $quem; não bloqueado pelo $av" }
+                Write-Log 'INFO' "Download verificado: $($s.Nome)$deOnde - $(if ($av) { "nao bloqueado pelo $av" } else { 'limpo' }), assinado por $quem"
             } else {
                 $res = 'sem-assinatura'; $det = 'Sem ameacas conhecidas, mas o programa NAO tem assinatura digital: so execute se confiar na origem'
-                Write-Log 'ALERTA' "[Download] $($s.Nome)$deOnde - programa SEM assinatura digital (Defender nao achou ameaca)"
+                if ($av) { $det = "O $av não bloqueou, mas o programa NÃO tem assinatura digital: só execute se confiar na origem" }
+                Write-Log 'ALERTA' "[Download] $($s.Nome)$deOnde - programa SEM assinatura digital ($quemVerifica nao bloqueou)"
                 Show-Alerta 'WebGuardian: programa sem assinatura' "$($s.Nome)$deOnde`nSó execute se confiar na origem."
             }
         } else {
-            Write-Log 'INFO' "Download verificado: $($s.Nome)$deOnde - limpo"
+            if ($av) { Write-Log 'INFO' "Download conferido: $($s.Nome)$deOnde - nao bloqueado pelo $av" }
+            else { Write-Log 'INFO' "Download verificado: $($s.Nome)$deOnde - limpo" }
         }
         Add-DownloadRecente @{ quando = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); nome = $s.Nome; caminho = $s.Arquivo; origem = $s.Origem
                                tamanho = [int64]$s.Tamanho; resultado = $res; detalhe = $det }
@@ -626,7 +691,7 @@ function Clear-DownloadsVerificados {
 function Get-DownloadsPainel {
     $lista = @()
     foreach ($s in @($script:ScansDownload | Where-Object { $_ })) {
-        $lista += @{ quando = $s.Inicio.ToString('yyyy-MM-dd HH:mm:ss'); nome = $s.Nome; caminho = $s.Arquivo; origem = $s.Origem; tamanho = [int64]$s.Tamanho; resultado = 'verificando'; detalhe = 'Windows Defender verificando agora' }
+        $lista += @{ quando = $s.Inicio.ToString('yyyy-MM-dd HH:mm:ss'); nome = $s.Nome; caminho = $s.Arquivo; origem = $s.Origem; tamanho = [int64]$s.Tamanho; resultado = 'verificando'; detalhe = $(if ($s.OutroAV) { 'Conferindo agora' } else { 'Windows Defender verificando agora' }) }
     }
     foreach ($k in @($script:FilaDownloads.Keys)) {
         $lista += @{ quando = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); nome = [IO.Path]::GetFileName($k); caminho = $k; origem = ''; tamanho = [int64]0; resultado = 'baixando'; detalhe = 'Aguardando o download terminar' }
@@ -657,6 +722,8 @@ function Get-DuracaoPrevista([string]$Tipo) {
 function Start-Varredura([string]$Tipo) {
     $v = $script:Varredura
     if ($v -and -not $v.Fim) { $e = Get-EstadoVarredura; return "Ja existe uma verificacao $($v.Tipo) em andamento ($($e.pct)%)." }
+    $outro = Get-AntivirusSubstituto
+    if ($outro) { return "O antivírus ativo deste PC é o ${outro}: faça a verificação $(if ($Tipo -eq 'rapida') { 'rápida' } else { $Tipo }) pela tela do $outro. O Windows desliga o Defender quando outro antivírus está ligado." }
     $prev = Get-DuracaoPrevista $Tipo
     $tipoMp = 'QuickScan'; if ($Tipo -eq 'completa') { $tipoMp = 'FullScan' }
     $job = Start-Job -ScriptBlock { param($t) Start-MpScan -ScanType $t } -ArgumentList $tipoMp
@@ -1181,10 +1248,24 @@ function Test-Defender {
     try {
         $st = Get-MpComputerStatus -ErrorAction Stop
         if (-not $st.RealTimeProtectionEnabled -or -not $st.AntivirusEnabled) {
-            if (-not $script:AvisouDefenderOff) {
-                Write-Log 'CRITICO' 'Protecao em tempo real do Defender esta DESLIGADA'
-                Show-Alerta 'WebGuardian: CRITICO' 'O Windows Defender foi desligado! Religue em Seguranca do Windows.'
-                $script:AvisouDefenderOff = $true
+            $outro = Get-OutroAntivirus
+            if ($outro -and $outro.Ligado) {
+                # Normal: o Windows desliga o Defender quando outro antivírus (Avast, AVG, Norton...) está ligado
+                if ($script:AvisouDefenderOff -ne "outro:$($outro.Nome)") {
+                    Write-Log 'INFO' "Antivirus ativo deste PC: $($outro.Nome). O Windows desliga o tempo real do Defender quando outro antivirus esta ligado (normal)."
+                    $script:AvisouDefenderOff = "outro:$($outro.Nome)"
+                }
+                if (-not $outro.EmDia -and -not $script:AvisouOutroVelho) {
+                    Write-Log 'ALERTA' "A base de ameacas do $($outro.Nome) esta desatualizada. Abra o $($outro.Nome) e atualize."
+                    $script:AvisouOutroVelho = $true
+                } elseif ($outro.EmDia) { $script:AvisouOutroVelho = $false }
+            } elseif ($script:AvisouDefenderOff -ne 'desligado') {
+                $quem = 'O Windows Defender foi desligado! Religue em Seguranca do Windows.'
+                $msg = 'Protecao em tempo real do Defender esta DESLIGADA'
+                if ($outro) { $quem = "Nenhum antivirus esta ligado: o $($outro.Nome) e o Defender estao desligados."; $msg = "NENHUM antivirus ligado: $($outro.Nome) desligado e Defender desligado" }
+                Write-Log 'CRITICO' $msg
+                Show-Alerta 'WebGuardian: CRITICO' $quem
+                $script:AvisouDefenderOff = 'desligado'
             }
         } else { $script:AvisouDefenderOff = $false }
         foreach ($t in Get-MpThreatDetection -ErrorAction SilentlyContinue | Where-Object { $_.InitialDetectionTime -gt $script:UltimaChecagemDefender }) {
@@ -1290,6 +1371,8 @@ function Get-EstadoDefender {
             @{ quando = Format-Data $_.InitialDetectionTime; nome = "$($nomes["$($_.ThreatID)"])"; arquivos = (@($_.Resources) -join ', '); resolvido = [bool]$_.ActionSuccess }
         })
     } catch { }
+    # Outro antivírus registrado no Windows (Avast, AVG, Norton...): com ele ligado, o Defender desligado é normal
+    try { $o = Get-OutroAntivirus; if ($o) { $def.outro = @{ nome = $o.Nome; ligado = [bool]$o.Ligado; emDia = [bool]$o.EmDia } } } catch { }
     return $def
 }
 
