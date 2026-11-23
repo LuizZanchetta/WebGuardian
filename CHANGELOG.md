@@ -2,6 +2,21 @@
 
 Cada versão é publicada em [Releases](https://github.com/LuizZanchetta/WebGuardian/releases) com a etiqueta `vX.Y.Z`. Toda versão oficial é assinada digitalmente: a impressão digital precisa ser **`WG-D0C5-ACA9-5777-6D53-ED11`**.
 
+## 1.9.0 — 2026-11-23
+
+**Ameaças do antivírus na aba Decisões: você decide pelo WebGuardian**
+
+Antes, quando o Windows Defender pegava uma ameaça, ela só aparecia como "Neutralizada" na aba Defender, e para decidir o que fazer era preciso abrir a Segurança do Windows. Agora a decisão é feita direto no WebGuardian.
+
+- **Toda ameaça que o Defender detecta num arquivo vira uma decisão** na aba Decisões, com aviso na tela. Ela aparece em até 1 minuto depois da detecção, mesmo com o app fechado.
+- **Liberar** (alarme falso): o Defender passa a permitir aquela ameaça neste PC, como o "Permitir no dispositivo" da Segurança do Windows, e devolve o arquivo da quarentena dele para o lugar de antes. O painel pede confirmação com aviso.
+- **Apagar ameaça**: se a ameaça ainda estiver ativa, o Defender a remove (e o que sobrar do arquivo é apagado). Se ela já estiver na quarentena do Defender, continua presa lá, criptografada e sem poder rodar, até o Defender apagá-la sozinho. O painel explica isso, sem fingir que apagou.
+- **Ameaça ativa** (que o Defender não conseguiu neutralizar) aparece como **Severidade crítica**, no topo da fila.
+- **Uma decisão por ameaça e arquivo**: várias detecções do mesmo arquivo não viram várias decisões. Se a mesma ameaça voltar depois de você decidir, ela vira uma decisão nova.
+- Ao atualizar, as detecções dos **últimos 7 dias** também entram na fila (as escondidas pelo "Limpar lista" continuam escondidas).
+- Bloqueios só na memória (um script barrado antes de rodar) não têm arquivo para decidir e continuam como alerta.
+- Ameaças apontadas pelo **Avast e outros antivírus** em downloads e verificações pedidas pelo WebGuardian já iam para Decisões e continuam indo.
+
 ## 1.8.2 — 2026-11-23
 
 **Verificação pelo antivírus ativo, sem abrir a tela dele**
@@ -11,9 +26,7 @@ Com o Avast (ou AVG, Kaspersky, ESET…) ligado, o WebGuardian agora pede ao pr�
 - **Downloads verificados de verdade pelo outro antivírus**: "Limpo" quando ele confere e não acha nada; se ele apontar uma ameaça, o WebGuardian **isola o arquivo** até você decidir.
 - **Verificação rápida e completa pelo outro antivírus**, direto do painel ou pelo atalho de emergência, com **porcentagem real** (arquivos conferidos de um total).
 - **Verificação rápida automática uma vez por dia**, em segundo plano, 20 minutos depois de ligar o PC. Você só é avisado se algo for encontrado. Com o Defender, ela é pulada se ele já fez a dele nas últimas 24 h.
-- Se o outro antivírus não atender pedidos pelo AMSI, o WebGuardian não afirma "Limpo": mostra "Sem bloqueio" e orienta a usar a tela dele.
-- **Ameaças detectadas pelo Defender agora aparecem na aba Decisões**, como na Segurança do Windows: **Liberar** (alarme falso: o Defender passa a permitir e devolve o arquivo da quarentena) ou **Apagar** (remove a ameaça ativa; se já estiver na quarentena, ela continua presa lá). Uma decisão por ameaça e arquivo, sem repetir detecções do mesmo arquivo. Bloqueios só na memória continuam como alerta.
-- GitHub: link **Baixar o WebGuardian** no topo da página principal, sempre com a versão mais recente.
+- Se o outro antivírus não atender pedidos pelo AMSI, o WebGuardian não afirma "Limpo": mostra "Sem bloqueio" e orienta a usar a tela dele.- GitHub: link **Baixar o WebGuardian** no topo da página principal, sempre com a versão mais recente.
 
 ## 1.8.1 — 2026-11-23
 

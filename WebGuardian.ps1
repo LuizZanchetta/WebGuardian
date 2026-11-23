@@ -60,7 +60,8 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
-$VersaoGuardiao = '1.8.2'   # 1.8.2: verificação pelo antivírus ativo (AMSI): downloads e verificações rápida/completa
+$VersaoGuardiao = '1.9.0'   # 1.9.0: ameaças detectadas pelo Defender na aba Decisões (liberar ou apagar)
+                            # 1.8.2: verificação pelo antivírus ativo (AMSI): downloads e verificações rápida/completa
                             #        com Avast/AVG/Kaspersky... sem abrir a tela deles; verificação rápida automática diária
                             # 1.8.1: compatível com outros antivírus (Avast, AVG, Norton...): sem alarme falso de
                             #        "Defender desligado", downloads conferidos pelo antivírus ativo

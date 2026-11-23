@@ -8,9 +8,9 @@ com o Windows Defender.
 > **Tudo roda só no seu computador.** Não há servidor, conta, nem envio de dados seus para a
 > internet. Cada pessoa que instala tem o seu WebGuardian independente.
 
-**Versão atual: 1.8.2**
+**Versão atual: 1.9.0**
 
-### ⬇️ [Baixar o WebGuardian 1.8.2 (versão mais recente)](https://github.com/LuizZanchetta/WebGuardian/archive/refs/tags/v1.8.2.zip)
+### ⬇️ [Baixar o WebGuardian 1.9.0 (versão mais recente)](https://github.com/LuizZanchetta/WebGuardian/archive/refs/tags/v1.9.0.zip)
 
 O que mudou nesta versão e nas anteriores: **[Releases](https://github.com/LuizZanchetta/WebGuardian/releases/latest)**.
 Depois de baixar, siga a [Instalação](#instalação).
@@ -337,10 +337,11 @@ powershell -ExecutionPolicy Bypass -File app\compilar.ps1
 
 Notas completas de cada versão: [CHANGELOG](CHANGELOG.md) e [Releases](https://github.com/LuizZanchetta/WebGuardian/releases).
 
+- **1.9.0** — ameaças detectadas pelo Defender aparecem na aba **Decisões**: liberar (alarme
+  falso: permite e devolve o arquivo) ou apagar, sem abrir a Segurança do Windows.
 - **1.8.2** — verificação pelo antivírus ativo (Avast, AVG, Kaspersky…) sem abrir a tela dele:
   downloads e verificações rápida/completa com porcentagem real; verificação rápida automática
-  uma vez por dia; ameaças detectadas pelo Defender na aba Decisões (liberar ou apagar);
-  botão de download da versão mais recente no topo da página.
+  uma vez por dia; botão de download da versão mais recente no topo da página.
 - **1.8.1** — compatível com outros antivírus (Avast, AVG, Norton…): sem alarme falso de
   "Defender desligado", painel mostra o antivírus ativo, downloads conferidos pelo antivírus
   ativo e alerta se nenhum antivírus estiver ligado.
