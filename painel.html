@@ -893,7 +893,6 @@ function render(s) {
   if (s.redeIsolada) setBtn(bm, 'primary', 'restaurarRede', 'i-plug', 'Reconectar à internet');
   else if (pend.length) { setBtn(bm, 'primary', null, 'i-inbox', 'Revisar decisões'); bm.onclick = () => ir('decisoes'); }
   else if (!mon.rodando && mon.instalado) setBtn(bm, 'primary', 'iniciarMonitor', 'i-pulse', 'Iniciar monitor');
-  else if (outro) { setBtn(bm, 'primary', null, 'i-download', 'Ver downloads conferidos'); bm.onclick = () => ir('defender'); }
   else setBtn(bm, 'primary', 'scanRapido', 'i-scan', 'Fazer verificação rápida');
   $('b-rede').style.display = s.redeIsolada ? 'none' : '';
   // Botão de emergência da rede alterna entre desconectar e reconectar
@@ -920,7 +919,11 @@ function render(s) {
   if (vr && vr.ativo) {
     const nomeTipo = vr.tipo === 'completa' ? 'completa' : 'rápida';
     sc.className = 'alert info'; $('scan-spin').style.display = '';
-    $('scan-txt').textContent = 'Verificação ' + nomeTipo + ' do Defender' + (vr.finalizando ? ' · finalizando…' : ' · faltam cerca de ' + minutos(vr.restante)) + ' · estimado pela ' + acentuar(vr.base);
+    $('scan-txt').textContent = vr.motor
+      // feita pelo antivírus ativo (Avast etc.) a pedido do WebGuardian: contagem real de arquivos
+      ? 'Verificação ' + nomeTipo + (vr.auto ? ' automática' : '') + ' pelo ' + vr.motor + ' · ' + (vr.listando ? 'listando arquivos…'
+          : vr.feitos + ' de ' + vr.total + ' arquivos' + (vr.restante ? ' · faltam cerca de ' + minutos(vr.restante) : ''))
+      : 'Verificação ' + nomeTipo + (vr.auto ? ' automática' : '') + ' do Defender' + (vr.finalizando ? ' · finalizando…' : ' · faltam cerca de ' + minutos(vr.restante)) + ' · estimado pela ' + acentuar(vr.base);
     $('scan-pct').textContent = vr.pct + '%'; $('scan-bar').style.width = vr.pct + '%';
     sc.style.display = 'flex'; varreduraVista = true;
   } else if (vr && vr.resultado) {
@@ -936,7 +939,7 @@ function render(s) {
   } else sc.style.display = 'none';
   const varrendo = !!(vr && vr.ativo);
   document.querySelectorAll('[data-acao="scanRapido"],[data-acao="scanCompleto"]').forEach(b => { b.disabled = varrendo; });
-  $('e-scan-s').textContent = varrendo ? 'Em andamento: ' + vr.pct + '% (estimado)' : outro ? 'Faça pela tela do ' + outro.nome : 'Defender procura ameaças agora';
+  $('e-scan-s').textContent = varrendo ? 'Em andamento: ' + vr.pct + '%' + (vr.motor ? '' : ' (estimado)') : outro ? 'O ' + outro.nome + ' confere, sem abrir o app dele' : 'Defender procura ameaças agora';
 
   // Downloads verificados
   const dls = list(s.downloads);
@@ -1003,6 +1006,7 @@ function render(s) {
   if (outro) {
     // Normal: o Windows desliga o Defender enquanto outro antivírus está ligado
     linha('Proteção em tempo real do Defender', 'Desligada pelo Windows: o ' + outro.nome + ' está no lugar');
+    linha('Verificações e downloads', 'Conferidos pelo ' + outro.nome + ', a pedido do WebGuardian', 'ok');
   } else {
     linha('Proteção em tempo real', d.tempoReal ? 'Ativa' : 'Desligada', d.tempoReal ? 'ok' : 'bad');
     linha('Antivírus', d.antivirus ? 'Ativo' : 'Desligado', d.antivirus ? 'ok' : 'bad');
@@ -1014,6 +1018,7 @@ function render(s) {
   }
   // Base de dados de ameaças (assinaturas do Defender) e proteções extras
   const base = s.baseAtualizando ? 'Atualizando agora…' : (d.versaoBase ? 'v' + d.versaoBase + ' · há ' + (d.horasBase < 1 ? 'menos de 1 h' : Math.round(d.horasBase) + ' h') : '—');
+  linha('Verificação automática', 'Rápida, 1 vez por dia' + (s.varreduraAuto ? ' · última ' + curta(s.varreduraAuto.slice(8, 10) + '/' + s.varreduraAuto.slice(5, 7) + '/' + s.varreduraAuto.slice(0, 4) + ' ' + s.varreduraAuto.slice(11, 16)).toLowerCase() : ' · a primeira roda 20 min depois de ligar'));
   if (outro) linha('Base de ameaças do Defender', 'Parada enquanto o ' + outro.nome + ' estiver ligado (ele atualiza a dele)');
   else linha('Base de ameaças (atualiza a cada 3 h)', base, s.baseAtualizando ? null : d.horasBase > 24 ? 'warn' : null);
   const linhaBotao = (k, txt, tom, acao, id, rotulo) => {

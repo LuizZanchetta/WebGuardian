@@ -60,7 +60,9 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
-$VersaoGuardiao = '1.8.1'   # 1.8.1: compatível com outros antivírus (Avast, AVG, Norton...): sem alarme falso de
+$VersaoGuardiao = '1.8.2'   # 1.8.2: verificação pelo antivírus ativo (AMSI): downloads e verificações rápida/completa
+                            #        com Avast/AVG/Kaspersky... sem abrir a tela deles; verificação rápida automática diária
+                            # 1.8.1: compatível com outros antivírus (Avast, AVG, Norton...): sem alarme falso de
                             #        "Defender desligado", downloads conferidos pelo antivírus ativo
                             # 1.8.0: primeira versão pública: assinatura digital oficial + conferência de autenticidade
                             #        (na instalação, na atualização e a cada 10 min nos arquivos instalados)
@@ -615,26 +617,51 @@ function Step-Downloads {
             try { $p = Start-Process -FilePath $MpCmdRun -ArgumentList @('-Scan', '-ScanType', '3', '-File', "`"$arq`"") -WindowStyle Hidden -PassThru -ErrorAction Stop }
             catch { Write-Log 'INFO' "Nao foi possivel chamar o Defender para $($item.Name): $_" }
         }
-        # Com outro antivírus ligado o Defender fica desligado pelo Windows e não verifica: quem confere o arquivo
-        # é o outro antivírus, em tempo real (ao gravar e ao abrir). O WebGuardian segue com as regras contra golpes
-        # e a conferência da assinatura digital.
+        # Com outro antivírus ligado o Windows desliga o Defender: o WebGuardian pede ao OUTRO antivírus que confira
+        # o arquivo (AMSI), em segundo plano. Regras contra golpes e assinatura digital continuam valendo.
+        $tarefa = $null
+        if ($outroAv -and (Test-AmsiOutroAntivirus)) { try { $tarefa = [Guardiao.Varredor]::VerificarAsync($arq, 64) } catch { } }
         $script:CacheEditor.Remove($arq)
-        $script:ScansDownload += @{ Arquivo = $arq; Nome = $item.Name; Tamanho = $item.Length; Origem = $origem; Processo = $p; Inicio = Get-Date; Regra = $regra; Criado = $item.CreationTime; OutroAV = $outroAv }
+        $script:ScansDownload += @{ Arquivo = $arq; Nome = $item.Name; Tamanho = $item.Length; Origem = $origem; Processo = $p; Inicio = Get-Date; Regra = $regra; Criado = $item.CreationTime; OutroAV = $outroAv; Tarefa = $tarefa }
     }
     # 3) verificações terminadas -> resultado
     $ainda = @()
     foreach ($s in @($script:ScansDownload | Where-Object { $_ })) {
         if ($s.Processo -and -not $s.Processo.HasExited -and ((Get-Date) - $s.Inicio).TotalMinutes -lt 20) { $ainda += $s; continue }
+        if ($s.Tarefa -and -not $s.Tarefa.IsCompleted -and ((Get-Date) - $s.Inicio).TotalMinutes -lt 20) { $ainda += $s; continue }
         $codigo = -1; if ($s.Processo -and $s.Processo.HasExited) { $codigo = $s.Processo.ExitCode }
         $existe = Test-Path -LiteralPath $s.Arquivo
         $deOnde = ''; if ($s.Origem) { $deOnde = " (baixado de $($s.Origem))" }
         $ext = [IO.Path]::GetExtension($s.Arquivo).ToLower()
         $res = 'limpo'; $det = 'Nenhuma ameaca encontrada pelo Defender'
-        $av = $s.OutroAV; $quemVerifica = 'Defender'
+        $av = $s.OutroAV; $quemVerifica = 'Defender'; $estadoAv = ''
         if ($av) {
-            # O outro antivírus confere em tempo real; não há como perguntar o resultado a ele (sem afirmar "limpo")
             $codigo = 0; $quemVerifica = $av
-            $res = 'outro-av'; $det = "Não bloqueado pelo $av, o antivírus ativo deste PC (ele confere o arquivo ao gravar e ao abrir)"
+            $estadoAv = 'indisponivel'
+            if ($s.Tarefa -and $s.Tarefa.IsCompleted -and -not $s.Tarefa.IsFaulted) { $estadoAv = "$($s.Tarefa.Result)" }
+            if ($estadoAv -eq 'limpo') {
+                # o outro antivírus conferiu o arquivo a pedido do WebGuardian e não achou ameaça
+                $res = 'limpo'; $det = "Nenhuma ameaça encontrada pelo $av"
+            } else {
+                # grande demais / sem AMSI: só a proteção em tempo real dele (sem afirmar "limpo")
+                $res = 'outro-av'; $det = "Não bloqueado pelo $av, o antivírus ativo deste PC (ele confere o arquivo ao gravar e ao abrir)"
+            }
+        }
+        if ($av -and $estadoAv -eq 'ameaca') {
+            # O outro antivírus apontou ameaça: o WebGuardian isola o arquivo até você decidir
+            $nmA = $s.Nome
+            $isolou = $false; if (Test-Path -LiteralPath $s.Arquivo) { $isolou = Lock-ArquivoBaixado $s.Arquivo "O $av encontrou uma ameaca neste download$deOnde" }
+            Write-Log 'CRITICO' "Download com AMEACA encontrada pelo ${av}: $nmA$deOnde"
+            Show-Alerta 'WebGuardian: download perigoso' "$nmA$deOnde`nO $av encontrou uma ameaça. $(if ($isolou) { 'O WebGuardian isolou o arquivo.' } else { '' })"
+            $r1 = 'ameaca'; $d1 = "O $av encontrou uma ameaça"; if ($isolou) { $r1 = 'isolado'; $d1 = "O $av encontrou uma ameaça; o WebGuardian isolou o arquivo (aba Decisões)" }
+            Add-DownloadRecente @{ quando = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); nome = $nmA; caminho = $s.Arquivo; origem = $s.Origem; tamanho = [int64]$s.Tamanho; resultado = $r1; detalhe = $d1 }
+            continue
+        }
+        if ($av -and $estadoAv -eq 'bloqueado') {
+            Write-Log 'CRITICO' "Download com AMEACA bloqueado pelo ${av}: $($s.Nome)$deOnde"
+            Show-Alerta 'WebGuardian: download perigoso' "$($s.Nome)$deOnde`nO $av bloqueou o arquivo."
+            Add-DownloadRecente @{ quando = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); nome = $s.Nome; caminho = $s.Arquivo; origem = $s.Origem; tamanho = [int64]$s.Tamanho; resultado = 'ameaca'; detalhe = "O $av bloqueou o arquivo" }
+            continue
         }
         # Ameaça se a verificação achou, OU se a proteção em tempo real do Defender já detectou este arquivo desde que ele
         # foi criado (nesse caso a verificação manual pode responder "nada encontrado" porque o Defender já está cuidando dele)
@@ -663,16 +690,19 @@ function Step-Downloads {
             if ($ed -eq 'microsoft' -or $ed -like 'assinado:*') {
                 $quem = 'Microsoft'; if ($ed -like 'assinado:*') { $quem = $ed.Substring(9) }
                 $det = "Instalador/programa assinado por $quem; sem ameacas"
-                if ($av) { $det = "Instalador/programa assinado por $quem; não bloqueado pelo $av" }
-                Write-Log 'INFO' "Download verificado: $($s.Nome)$deOnde - $(if ($av) { "nao bloqueado pelo $av" } else { 'limpo' }), assinado por $quem"
+                if ($av -and $res -eq 'limpo') { $det = "Instalador/programa assinado por $quem; nenhuma ameaça encontrada pelo $av" }
+                elseif ($av) { $det = "Instalador/programa assinado por $quem; não bloqueado pelo $av" }
+                Write-Log 'INFO' "Download verificado: $($s.Nome)$deOnde - $(if ($av) { "$res pelo $av" } else { 'limpo' }), assinado por $quem"
             } else {
                 $res = 'sem-assinatura'; $det = 'Sem ameacas conhecidas, mas o programa NAO tem assinatura digital: so execute se confiar na origem'
-                if ($av) { $det = "O $av não bloqueou, mas o programa NÃO tem assinatura digital: só execute se confiar na origem" }
+                if ($av -and $estadoAv -eq 'limpo') { $det = "O $av não achou ameaça, mas o programa NÃO tem assinatura digital: só execute se confiar na origem" }
+                elseif ($av) { $det = "O $av não bloqueou, mas o programa NÃO tem assinatura digital: só execute se confiar na origem" }
                 Write-Log 'ALERTA' "[Download] $($s.Nome)$deOnde - programa SEM assinatura digital ($quemVerifica nao bloqueou)"
                 Show-Alerta 'WebGuardian: programa sem assinatura' "$($s.Nome)$deOnde`nSó execute se confiar na origem."
             }
         } else {
-            if ($av) { Write-Log 'INFO' "Download conferido: $($s.Nome)$deOnde - nao bloqueado pelo $av" }
+            if ($av -and $res -eq 'limpo') { Write-Log 'INFO' "Download verificado: $($s.Nome)$deOnde - limpo pelo $av" }
+            elseif ($av) { Write-Log 'INFO' "Download conferido: $($s.Nome)$deOnde - nao bloqueado pelo $av" }
             else { Write-Log 'INFO' "Download verificado: $($s.Nome)$deOnde - limpo" }
         }
         Add-DownloadRecente @{ quando = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); nome = $s.Nome; caminho = $s.Arquivo; origem = $s.Origem
@@ -691,7 +721,7 @@ function Clear-DownloadsVerificados {
 function Get-DownloadsPainel {
     $lista = @()
     foreach ($s in @($script:ScansDownload | Where-Object { $_ })) {
-        $lista += @{ quando = $s.Inicio.ToString('yyyy-MM-dd HH:mm:ss'); nome = $s.Nome; caminho = $s.Arquivo; origem = $s.Origem; tamanho = [int64]$s.Tamanho; resultado = 'verificando'; detalhe = $(if ($s.OutroAV) { 'Conferindo agora' } else { 'Windows Defender verificando agora' }) }
+        $lista += @{ quando = $s.Inicio.ToString('yyyy-MM-dd HH:mm:ss'); nome = $s.Nome; caminho = $s.Arquivo; origem = $s.Origem; tamanho = [int64]$s.Tamanho; resultado = 'verificando'; detalhe = $(if ($s.OutroAV) { "$($s.OutroAV) verificando agora" } else { 'Windows Defender verificando agora' }) }
     }
     foreach ($k in @($script:FilaDownloads.Keys)) {
         $lista += @{ quando = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); nome = [IO.Path]::GetFileName($k); caminho = $k; origem = ''; tamanho = [int64]0; resultado = 'baixando'; detalhe = 'Aguardando o download terminar' }
@@ -719,28 +749,56 @@ function Get-DuracaoPrevista([string]$Tipo) {
     return @{ Segundos = [int][Math]::Max(900, $gb * 15); Base = 'tamanho do disco' }
 }
 
-function Start-Varredura([string]$Tipo) {
+function Start-Varredura([string]$Tipo, [switch]$Auto) {
     $v = $script:Varredura
     if ($v -and -not $v.Fim) { $e = Get-EstadoVarredura; return "Ja existe uma verificacao $($v.Tipo) em andamento ($($e.pct)%)." }
+    # Outro antivírus ligado (Avast etc.): o WebGuardian manda ELE conferir os arquivos, sem abrir a tela dele
     $outro = Get-AntivirusSubstituto
-    if ($outro) { return "O antivírus ativo deste PC é o ${outro}: faça a verificação $(if ($Tipo -eq 'rapida') { 'rápida' } else { $Tipo }) pela tela do $outro. O Windows desliga o Defender quando outro antivírus está ligado." }
+    if ($outro) { return (Start-VarreduraAntivirus $Tipo $outro -Auto:$Auto) }
     $prev = Get-DuracaoPrevista $Tipo
     $tipoMp = 'QuickScan'; if ($Tipo -eq 'completa') { $tipoMp = 'FullScan' }
     $job = Start-Job -ScriptBlock { param($t) Start-MpScan -ScanType $t } -ArgumentList $tipoMp
-    $script:Varredura = @{ Tipo = $Tipo; Inicio = Get-Date; Previsto = $prev.Segundos; Base = $prev.Base; Job = $job; Fim = $null; Resultado = '' }
+    $script:Varredura = @{ Tipo = $Tipo; Inicio = Get-Date; Previsto = $prev.Segundos; Base = $prev.Base; Job = $job; Fim = $null; Resultado = ''; Auto = [bool]$Auto }
     $script:JobScan = $job
-    Write-Log 'INFO' "Verificacao $Tipo do Defender iniciada (previsao: $([Math]::Ceiling($prev.Segundos / 60)) min, pela $($prev.Base))"
+    $comoTxt = ''; if ($Auto) { $comoTxt = ' (automatica diaria)' }
+    Write-Log 'INFO' "Verificacao $Tipo do Defender iniciada$comoTxt (previsao: $([Math]::Ceiling($prev.Segundos / 60)) min, pela $($prev.Base))"
     return "Verificacao $Tipo iniciada. Previsao: cerca de $([Math]::Ceiling($prev.Segundos / 60)) min."
 }
 
 function Get-EstadoVarredura {
     $v = $script:Varredura
     if (-not $v) { return $null }
+    if ($v.Motor) {
+        # Verificação feita pelo outro antivírus via WebGuardian: porcentagem REAL (arquivos conferidos)
+        $A = [Guardiao.VarreduraAv]
+        if (-not $v.Fim -and $A::Fim) {
+            $v.Fim = Get-Date
+            try { Complete-VarreduraAntivirus $v } catch { $v.Resultado = "Concluida com erro ao tratar o resultado: $_" }
+            Write-Log 'INFO' "Verificacao $($v.Tipo) pelo $($v.Motor) terminou em $([Math]::Round(($v.Fim - $v.Inicio).TotalMinutes, 1)) min. $($v.Resultado)"
+        }
+        $ate = Get-Date; if ($v.Fim) { $ate = $v.Fim }
+        $dec = ($ate - $v.Inicio).TotalSeconds; $tot = [int]$A::Total; $feitos = [int]$A::Feitos
+        $info = @{ tipo = $v.Tipo; motor = $v.Motor; decorrido = [int]$dec; estimado = $false; total = $tot; feitos = $feitos; auto = [bool]$v.Auto }
+        if ($v.Fim) {
+            if (((Get-Date) - $v.Fim).TotalMinutes -gt 3) { $script:Varredura = $null; return $null }
+            return $info + @{ ativo = $false; pct = 100; restante = 0; listando = $false; base = "$tot arquivos conferidos pelo $($v.Motor)"; resultado = $v.Resultado }
+        }
+        $listando = [bool]$A::Listando; $pct = 0; $resta = 0
+        if (-not $listando -and $tot -gt 0) {
+            $pct = [int][Math]::Min(99, [Math]::Floor(100 * $feitos / $tot))
+            if ($feitos -gt 0) { $resta = [int](($dec / $feitos) * ($tot - $feitos)) }
+        }
+        $base = "$feitos de $tot arquivos conferidos pelo $($v.Motor)"; if ($listando) { $base = "listando arquivos ($tot ate agora)" }
+        return $info + @{ ativo = $true; pct = $pct; restante = $resta; listando = $listando; finalizando = $false; base = $base; resultado = '' }
+    }
     if (-not $v.Fim -and $v.Job.State -ne 'Running' -and $v.Job.State -ne 'NotStarted') {
         $v.Fim = Get-Date
         $novas = @(Get-MpThreatDetection -ErrorAction SilentlyContinue | Where-Object { $_.InitialDetectionTime -ge $v.Inicio }).Count
         if ($v.Job.State -eq 'Failed') { $v.Resultado = 'A verificacao nao terminou (o Defender recusou ou foi interrompido).' }
-        elseif ($novas) { $v.Resultado = "Concluida: $novas ameaca(s) encontrada(s). Veja a aba Defender."; Write-Log 'CRITICO' "Verificacao $($v.Tipo) encontrou $novas ameaca(s)" }
+        elseif ($novas) {
+            $v.Resultado = "Concluida: $novas ameaca(s) encontrada(s). Veja a aba Defender."; Write-Log 'CRITICO' "Verificacao $($v.Tipo) encontrou $novas ameaca(s)"
+            Show-Alerta 'WebGuardian: ameaca encontrada' "A verificacao $($v.Tipo) do Defender encontrou $novas ameaca(s)."
+        }
         else { $v.Resultado = 'Concluida: nenhuma ameaca encontrada.' }
         Write-Log 'INFO' "Verificacao $($v.Tipo) terminou em $([Math]::Round(($v.Fim - $v.Inicio).TotalMinutes, 1)) min. $($v.Resultado)"
         Remove-Job $v.Job -Force -ErrorAction SilentlyContinue
@@ -756,6 +814,204 @@ function Get-EstadoVarredura {
     return @{ ativo = $true; tipo = $v.Tipo; pct = $pct; decorrido = [int]$decorrido; restante = [int][Math]::Max(0, $v.Previsto - $decorrido)
               estimado = $true; finalizando = $final; base = $v.Base; resultado = '' }
 }
+
+# ============ VERIFICAÇÃO PELO ANTIVÍRUS ATIVO (Avast, AVG, Kaspersky... ou o próprio Defender) ============
+# O WebGuardian pede ao antivírus ativo do PC que confira cada arquivo pela interface oficial do Windows para
+# isso (AMSI). Assim downloads e verificações rápida/completa funcionam com qualquer antivírus compatível,
+# sem precisar abrir a tela dele. A porcentagem aqui é REAL (arquivos conferidos / total).
+if (-not ('Guardiao.Varredor' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace Guardiao {
+    public static class Varredor {
+        [DllImport("amsi.dll", CharSet = CharSet.Unicode)] static extern int AmsiInitialize(string appName, out IntPtr ctx);
+        [DllImport("amsi.dll")] static extern void AmsiUninitialize(IntPtr ctx);
+        [DllImport("amsi.dll", CharSet = CharSet.Unicode)] static extern int AmsiScanBuffer(IntPtr ctx, byte[] buffer, uint length, string contentName, IntPtr session, out int result);
+
+        public static bool Disponivel() {
+            IntPtr ctx;
+            try { if (AmsiInitialize("WebGuardian", out ctx) != 0 || ctx == IntPtr.Zero) return false; AmsiUninitialize(ctx); return true; }
+            catch { return false; }
+        }
+
+        // "limpo", "ameaca", "bloqueado" (o Windows recusou abrir: o antivírus pegou), "sumiu", "grande" (acima do
+        // limite: só a proteção em tempo real confere), "indisponivel" (sem AMSI) ou "erro:<mensagem>"
+        public static string Verificar(string caminho, int limiteMB) {
+            byte[] dados;
+            try {
+                var info = new FileInfo(caminho);
+                if (!info.Exists) return "sumiu";
+                if (info.Length > (long)limiteMB * 1024 * 1024) {
+                    using (var fs = new FileStream(caminho, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) { fs.ReadByte(); }
+                    return "grande";
+                }
+                using (var fs = new FileStream(caminho, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) {
+                    dados = new byte[fs.Length]; int lidos = 0, n;
+                    while (lidos < dados.Length && (n = fs.Read(dados, lidos, dados.Length - lidos)) > 0) lidos += n;
+                }
+            } catch (FileNotFoundException) { return "sumiu"; }
+            catch (IOException e) {
+                int cod = e.HResult & 0xFFFF;
+                if (cod == 225 || cod == 226) return "bloqueado";   // ERROR_VIRUS_INFECTED / ERROR_VIRUS_DELETED
+                return File.Exists(caminho) ? "erro:" + e.Message : "sumiu";
+            } catch (UnauthorizedAccessException e) { return File.Exists(caminho) ? "erro:" + e.Message : "sumiu"; }
+            catch (Exception e) { return "erro:" + e.Message; }
+            return Conferir(dados, Path.GetFileName(caminho));
+        }
+
+        public static string Conferir(byte[] dados, string nome) {
+            IntPtr ctx;
+            try { if (AmsiInitialize("WebGuardian", out ctx) != 0 || ctx == IntPtr.Zero) return "indisponivel"; }
+            catch { return "indisponivel"; }
+            try {
+                int res;
+                if (AmsiScanBuffer(ctx, dados, (uint)dados.Length, nome, IntPtr.Zero, out res) != 0) return "indisponivel";
+                if (res >= 32768) return "ameaca";                       // AMSI_RESULT_DETECTED
+                if (res >= 16384 && res <= 20479) return "ameaca";       // bloqueado pela política do antivírus
+                return "limpo";
+            } finally { AmsiUninitialize(ctx); }
+        }
+
+        public static Task<string> VerificarAsync(string caminho, int limiteMB) {
+            return Task.Run(() => Verificar(caminho, limiteMB));
+        }
+    }
+
+    // Verificação rápida/completa em segundo plano: lista os arquivos e manda o antivírus conferir um por um
+    public static class VarreduraAv {
+        public static volatile int Total, Feitos;
+        public static volatile bool Fim = true, Listando;
+        static readonly List<string> encontrados = new List<string>();
+        static readonly object trava = new object();
+
+        public static string[] Encontrados() { lock (trava) { return encontrados.ToArray(); } }
+
+        public static void Iniciar(string[] pastas, string[] arquivos, string[] extensoes, string[] ignorar, int limiteMB) {
+            lock (trava) { encontrados.Clear(); }
+            Total = 0; Feitos = 0; Listando = true; Fim = false;
+            var t = new Thread(() => Rodar(pastas, arquivos, extensoes, ignorar, limiteMB));
+            t.IsBackground = true; t.Priority = ThreadPriority.BelowNormal; t.Start();
+        }
+
+        static void Rodar(string[] pastas, string[] arquivos, string[] extensoes, string[] ignorar, int limiteMB) {
+            try {
+                var exts = new HashSet<string>(extensoes, StringComparer.OrdinalIgnoreCase);
+                var lista = new List<string>(); var vistos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var a in arquivos) if (!string.IsNullOrEmpty(a) && File.Exists(a) && vistos.Add(a)) lista.Add(a);
+                var pilha = new Stack<string>();
+                foreach (var p in pastas) if (!string.IsNullOrEmpty(p) && Directory.Exists(p)) pilha.Push(p);
+                while (pilha.Count > 0) {
+                    var dir = pilha.Pop();
+                    bool pular = false;
+                    foreach (var ig in ignorar) if (dir.IndexOf(ig, StringComparison.OrdinalIgnoreCase) >= 0) { pular = true; break; }
+                    if (pular) continue;
+                    try {
+                        foreach (var sub in Directory.GetDirectories(dir)) {
+                            try { if ((File.GetAttributes(sub) & FileAttributes.ReparsePoint) == 0) pilha.Push(sub); } catch { }
+                        }
+                        foreach (var f in Directory.GetFiles(dir)) {
+                            if (exts.Count > 0 && !exts.Contains(Path.GetExtension(f))) continue;
+                            try { if (((int)File.GetAttributes(f) & 0x441000) != 0) continue; } catch { continue; }   // só na nuvem: não baixa
+                            if (vistos.Add(f)) lista.Add(f);
+                        }
+                    } catch { }
+                    Total = lista.Count;
+                }
+                Total = lista.Count; Listando = false;
+                foreach (var f in lista) {
+                    string r = Varredor.Verificar(f, limiteMB);
+                    if (r == "ameaca" || r == "bloqueado") { lock (trava) { encontrados.Add(f + "|" + r); } }
+                    Feitos++;
+                }
+            } finally { Listando = false; Fim = true; }
+        }
+    }
+}
+'@
+}
+
+$ExtVarredura = @($ExtExecutaveis + @('.cpl', '.sys', '.ocx', '.wsh', '.chm', '.zip', '.rar', '.7z', '.cab', '.pdf', '.doc', '.docm', '.xls', '.xlsm', '.pptm', '.rtf') | Select-Object -Unique)
+$ArqVarreduraAuto = Join-Path $Pasta 'ultima_varredura_auto.txt'
+
+function Test-AmsiOutroAntivirus {
+    # O outro antivírus está registrado no AMSI? (sem isso o Windows responderia "nada encontrado" sem ninguém conferir)
+    $c = $script:CacheAmsiOutro
+    if ($c -and ((Get-Date) - $c.Quando).TotalMinutes -lt 10) { return $c.Valor }
+    $tem = $false
+    foreach ($k in @(Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\AMSI\Providers' -ErrorAction SilentlyContinue)) {
+        $dll = "$((Get-ItemProperty "Registry::HKEY_CLASSES_ROOT\CLSID\$($k.PSChildName)\InprocServer32" -ErrorAction SilentlyContinue).'(default)')"
+        if ($dll -and $dll -notmatch 'Windows Defender|MpOav\.dll') { $tem = $true }
+    }
+    $tem = $tem -and [Guardiao.Varredor]::Disponivel()
+    $script:CacheAmsiOutro = @{ Quando = Get-Date; Valor = $tem }
+    return $tem
+}
+
+function Start-VarreduraAntivirus([string]$Tipo, [string]$Motor, [switch]$Auto) {
+    if (-not (Test-AmsiOutroAntivirus)) {
+        return "O $Motor nao aceita pedidos de verificacao de outros programas (AMSI). Faca a verificacao pela tela do $Motor."
+    }
+    $p = [Environment]::GetFolderPath('UserProfile')
+    $arquivos = @(Get-Process -ErrorAction SilentlyContinue | ForEach-Object { $_.Path } | Where-Object { $_ } | Select-Object -Unique)
+    if ($Tipo -eq 'completa') {
+        $pastas = @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' -ErrorAction SilentlyContinue | ForEach-Object { "$($_.DeviceID)\" })
+    } else {
+        # rápida: onde as ameaças costumam ficar + os programas que estão rodando agora
+        $pastas = @((Join-Path $p 'Downloads'), [Environment]::GetFolderPath('Desktop'), $env:TEMP, (Join-Path $env:windir 'Temp'),
+                    [Environment]::GetFolderPath('Startup'), [Environment]::GetFolderPath('CommonStartup'), $env:PUBLIC,
+                    (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'), (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp'))
+    }
+    $ignorar = @('\Windows\WinSxS\', '\System Volume Information', '\Windows\servicing\', '\$WINDOWS.~BT', '\Windows\SoftwareDistribution\Download\', (Join-Path $Pasta 'quarentena-arquivos'))
+    [Guardiao.VarreduraAv]::Iniciar([string[]]$pastas, [string[]]$arquivos, [string[]]$ExtVarredura, [string[]]$ignorar, 64)
+    $script:Varredura = @{ Tipo = $Tipo; Inicio = Get-Date; Motor = $Motor; Fim = $null; Resultado = ''; Base = 'arquivos conferidos'; Previsto = 0; Auto = [bool]$Auto }
+    $comoTxt = 'pedida no painel'; if ($Auto) { $comoTxt = 'automatica diaria' }
+    Write-Log 'INFO' "Verificacao $Tipo pelo $Motor iniciada ($comoTxt): o WebGuardian manda o $Motor conferir cada arquivo"
+    $tipoTxt = 'rápida'; if ($Tipo -eq 'completa') { $tipoTxt = 'completa' }
+    return "Verificação $tipoTxt pelo $Motor iniciada. O WebGuardian manda o $Motor conferir cada arquivo, sem precisar abrir o $Motor."
+}
+
+function Complete-VarreduraAntivirus($v) {
+    # Terminou: isola o que o antivírus apontou (fora das pastas do sistema) e avisa
+    $achados = @([Guardiao.VarreduraAv]::Encontrados())
+    foreach ($e in $achados) {
+        $arq, $estado = $e -split '\|', 2
+        $nm = [IO.Path]::GetFileName($arq)
+        if ($estado -eq 'bloqueado' -or -not (Test-Path -LiteralPath $arq)) { Write-Log 'CRITICO' "Verificacao $($v.Tipo): o $($v.Motor) bloqueou $arq"; continue }
+        $sistema = $arq -like "$env:windir\*" -or $arq -like "$env:ProgramFiles\*" -or $arq -like "${env:ProgramFiles(x86)}\*"
+        if ($sistema) { Test-Alerta 'Ameaca no sistema' $arq "O $($v.Motor) apontou ameaca na verificacao $($v.Tipo). Arquivo do sistema: nao foi movido. Rode a verificacao offline." }
+        else { Lock-ArquivoBaixado $arq "O $($v.Motor) encontrou ameaca na verificacao $($v.Tipo)" | Out-Null }
+    }
+    $n = $achados.Count; $total = [Guardiao.VarreduraAv]::Total
+    if ($n) {
+        $v.Resultado = "Concluida: $n ameaca(s) encontrada(s) pelo $($v.Motor). Veja a aba Decisoes."
+        Write-Log 'CRITICO' "Verificacao $($v.Tipo) pelo $($v.Motor) encontrou $n ameaca(s) em $total arquivos"
+        Show-Alerta 'WebGuardian: ameaca encontrada' "A verificacao $($v.Tipo) encontrou $n ameaca(s). Abra o WebGuardian."
+    } else { $v.Resultado = "Concluida: nenhuma ameaca encontrada ($total arquivos conferidos pelo $($v.Motor))." }
+}
+
+function Step-VarreduraAutomatica {
+    # Verificação rápida AUTOMÁTICA uma vez por dia, em segundo plano, sem abrir nada (20 min depois de ligar)
+    if ((Get-Date) -lt $script:ProxVarreduraAuto) { return }
+    $script:ProxVarreduraAuto = (Get-Date).AddHours(1)
+    $ultima = [datetime]::MinValue
+    if (Test-Path $ArqVarreduraAuto) { try { $ultima = [datetime]::ParseExact((Get-Content $ArqVarreduraAuto -Raw).Trim(), 'yyyy-MM-dd HH:mm:ss', $null) } catch { } }
+    if (((Get-Date) - $ultima).TotalHours -lt 24) { return }
+    if ($script:Varredura -and -not $script:Varredura.Fim) { return }
+    $agora = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    if (-not (Get-AntivirusSubstituto)) {
+        # Defender ativo e já fez a verificação rápida dele nas últimas 24 h: não repete
+        try { $q = (Get-MpComputerStatus -ErrorAction Stop).QuickScanEndTime; if ($q -and ((Get-Date) - $q).TotalHours -lt 24) { Set-Content $ArqVarreduraAuto $agora -Encoding ASCII; return } } catch { }
+    }
+    Set-Content $ArqVarreduraAuto $agora -Encoding ASCII
+    Start-Varredura 'rapida' -Auto | Out-Null
+}
+$script:ProxVarreduraAuto = (Get-Date).AddMinutes(20)
 
 # --------------------------- Suspender processo ---------------------------
 if (-not ('Guardiao.Proc' -as [type])) {
@@ -1331,6 +1587,7 @@ function Get-EstadoPainel {
         baseAtualizando = [bool]($script:AtualizacaoDef -and -not $script:AtualizacaoDef.Fim)
         sessao      = Get-InfoSessao
         versao      = $VersaoGuardiao
+        varreduraAuto = $(if (Test-Path $ArqVarreduraAuto) { (Get-Content $ArqVarreduraAuto -Raw).Trim() } else { '' })
         autenticidade = $(if (-not $script:Autenticidade) { try { Update-Autenticidade } catch { } }
                           $a = $script:Autenticidade
                           if ($a) { @{ estado = $a.estado; versao = $a.versao; impressao = $a.impressao; fonte = $a.fonte; problemas = @($a.problemas | Select-Object -First 5) } })
@@ -2027,6 +2284,7 @@ switch ($PSCmdlet.ParameterSetName) {
                 try { Get-EstadoVarredura | Out-Null } catch { }   # registra o fim da verificação mesmo com o painel fechado
                 try { Step-AtualizacaoDefender } catch { Write-Log 'INFO' "Erro na atualizacao do Defender: $_" }   # base sempre em dia
                 if ((Get-Date) -ge $script:ProxAutenticidade) { try { Update-Autenticidade } catch { } }   # arquivos instalados intactos?
+                try { Step-VarreduraAutomatica } catch { Write-Log 'INFO' "Erro na verificacao automatica: $_" }   # 1x por dia, sem abrir nada
                 $desde = $agora.AddSeconds(-10)   # sobreposicao; duplicados sao ignorados pelo RecordId
                 $ciclo++
                 # Espera atendendo: cliques no icone, atalho, o painel e os downloads

@@ -154,6 +154,16 @@ switch ($PSCmdlet.ParameterSetName) {
             # Só a versão ATUAL precisa estar assinada nesta pasta (versões antigas: a assinatura está no commit da etiqueta)
             $conf = Test-Autenticidade (Join-Path $pasta 'ASSINATURA') $pasta
             if ($conf.estado -ne 'oficial' -or $conf.versao -ne $Versao) { throw "A pasta nao e a versao oficial $Versao assinada ($($conf.estado) $($conf.versao)). Assine antes." }
+            # Página principal do GitHub: link "Baixar o WebGuardian" sempre na versão mais recente
+            $arqReadme = Join-Path $pasta 'README.md'
+            $readme = [IO.File]::ReadAllText($arqReadme, [Text.Encoding]::UTF8)
+            $novoReadme = $readme -replace 'archive/refs/tags/v[\d.]+\.zip', "archive/refs/tags/v$Versao.zip" `
+                                  -replace 'Baixar o WebGuardian [\d.]+ \(', "Baixar o WebGuardian $Versao (" `
+                                  -replace '\*\*Versão atual: [\d.]+\*\*', "**Vers$([char]0xE3)o atual: $Versao**"
+            if ($novoReadme -ne $readme) {
+                [IO.File]::WriteAllText($arqReadme, $novoReadme, (New-Object Text.UTF8Encoding $false))
+                Write-Host "README atualizado: link de download agora aponta para a $Versao. Faca o commit ANTES de criar a etiqueta v$Versao." -ForegroundColor Yellow
+            }
         }
         $log = Get-Content -LiteralPath (Join-Path $pasta 'CHANGELOG.md') -Raw -Encoding UTF8
         $m = [regex]::Match($log, "(?ms)^## $([regex]::Escape($Versao))\b[^\r\n]*\r?\n(.*?)(?=^## |\z)")

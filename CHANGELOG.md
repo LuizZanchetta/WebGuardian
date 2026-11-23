@@ -2,6 +2,18 @@
 
 Cada versão é publicada em [Releases](https://github.com/LuizZanchetta/WebGuardian/releases) com a etiqueta `vX.Y.Z`. Toda versão oficial é assinada digitalmente: a impressão digital precisa ser **`WG-D0C5-ACA9-5777-6D53-ED11`**.
 
+## 1.8.2 — 2026-11-23
+
+**Verificação pelo antivírus ativo, sem abrir a tela dele**
+
+Com o Avast (ou AVG, Kaspersky, ESET…) ligado, o WebGuardian agora pede ao próprio antivírus que confira os arquivos, pela interface oficial do Windows para isso (AMSI). Não precisa abrir o app do antivírus.
+
+- **Downloads verificados de verdade pelo outro antivírus**: "Limpo" quando ele confere e não acha nada; se ele apontar uma ameaça, o WebGuardian **isola o arquivo** até você decidir.
+- **Verificação rápida e completa pelo outro antivírus**, direto do painel ou pelo atalho de emergência, com **porcentagem real** (arquivos conferidos de um total).
+- **Verificação rápida automática uma vez por dia**, em segundo plano, 20 minutos depois de ligar o PC. Você só é avisado se algo for encontrado. Com o Defender, ela é pulada se ele já fez a dele nas últimas 24 h.
+- Se o outro antivírus não atender pedidos pelo AMSI, o WebGuardian não afirma "Limpo": mostra "Sem bloqueio" e orienta a usar a tela dele.
+- GitHub: link **Baixar o WebGuardian** no topo da página principal, sempre com a versão mais recente.
+
 ## 1.8.1 — 2026-11-23
 
 **Compatível com outros antivírus (Avast, AVG, Norton, Kaspersky…)**

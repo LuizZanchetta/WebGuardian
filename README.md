@@ -8,7 +8,12 @@ com o Windows Defender.
 > **Tudo roda só no seu computador.** Não há servidor, conta, nem envio de dados seus para a
 > internet. Cada pessoa que instala tem o seu WebGuardian independente.
 
-**Versão atual: 1.8.1**
+**Versão atual: 1.8.2**
+
+### ⬇️ [Baixar o WebGuardian 1.8.2 (versão mais recente)](https://github.com/LuizZanchetta/WebGuardian/archive/refs/tags/v1.8.2.zip)
+
+O que mudou nesta versão e nas anteriores: **[Releases](https://github.com/LuizZanchetta/WebGuardian/releases/latest)**.
+Depois de baixar, siga a [Instalação](#instalação).
 
 > [!IMPORTANT]
 > **Versão oficial:** só existe uma fonte oficial do WebGuardian:
@@ -82,11 +87,18 @@ Quando outro antivírus está ligado, o **próprio Windows desliga** a proteçã
 Defender. Isso é normal, e o WebGuardian reconhece a situação:
 - não dá alarme de "Defender desligado": mostra **qual antivírus protege o PC**;
 - avisa se **nenhum** antivírus estiver ligado, ou se a base do outro antivírus estiver desatualizada;
-- nos downloads, quem confere o arquivo é o outro antivírus, em tempo real. O WebGuardian mostra
-  **Sem bloqueio** (em vez de "Limpo", porque não tem como perguntar o resultado ao outro
-  antivírus) e continua aplicando as **regras contra golpes** e a conferência de **assinatura digital**;
-- um programa que some logo depois de baixado aparece como "provavelmente bloqueado" pelo outro antivírus;
-- verificações rápida e completa ficam por conta da tela do outro antivírus.
+- **downloads e verificações rápida/completa são feitos pelo outro antivírus, a pedido do
+  WebGuardian, sem precisar abrir a tela dele**. O WebGuardian usa o AMSI, a interface oficial do
+  Windows para um programa pedir uma análise ao antivírus instalado (Avast, AVG, Kaspersky, ESET e outros
+  a suportam). A porcentagem da verificação é real: arquivos conferidos de um total;
+- se o outro antivírus apontar uma ameaça, o WebGuardian **isola o arquivo** até você decidir;
+- as **regras contra golpes** e a conferência de **assinatura digital** continuam valendo;
+- se o outro antivírus não atender pedidos pelo AMSI, o download aparece como **Sem bloqueio**
+  (sem afirmar "Limpo") e as verificações ficam pela tela dele.
+
+**Verificação automática:** uma verificação rápida roda sozinha **uma vez por dia**, em segundo
+plano, 20 minutos depois de ligar o PC, com o Defender ou com o outro antivírus. Você só é
+avisado se algo for encontrado. Com o Defender, ela é pulada se ele já fez a dele nas últimas 24 h.
 
 > **Alarme falso do outro antivírus:** alguns antivírus (por exemplo, a detecção por
 > comportamento do Avast, "IDP.*") podem desconfiar do WebGuardian. Ele faz coisas que um
@@ -123,8 +135,8 @@ não ganham passe livre só por serem da Microsoft: o WebGuardian confere o que 
 
 ## Instalação
 
-1. Baixe a versão mais recente em **[Releases](https://github.com/LuizZanchetta/WebGuardian/releases/latest)**
-   → **Source code (zip)**. Cada release traz as notas da atualização.
+1. Baixe pelo link **⬇️ Baixar o WebGuardian** no topo desta página (é sempre a versão mais
+   recente) ou em **[Releases](https://github.com/LuizZanchetta/WebGuardian/releases/latest)** → **Source code (zip)**.
 2. **Antes de extrair:** clique com o botão direito no ZIP → **Propriedades** → marque
    **Desbloquear** → OK. (Arquivos baixados vêm bloqueados pelo Windows.)
 3. Extraia para uma pasta sua (ex.: `Documentos\WebGuardian`). **Guarde essa pasta**: ela é
@@ -325,6 +337,9 @@ powershell -ExecutionPolicy Bypass -File app\compilar.ps1
 
 Notas completas de cada versão: [CHANGELOG](CHANGELOG.md) e [Releases](https://github.com/LuizZanchetta/WebGuardian/releases).
 
+- **1.8.2** — verificação pelo antivírus ativo (Avast, AVG, Kaspersky…) sem abrir a tela dele:
+  downloads e verificações rápida/completa com porcentagem real; verificação rápida automática
+  uma vez por dia; botão de download da versão mais recente no topo da página.
 - **1.8.1** — compatível com outros antivírus (Avast, AVG, Norton…): sem alarme falso de
   "Defender desligado", painel mostra o antivírus ativo, downloads conferidos pelo antivírus
   ativo e alerta se nenhum antivírus estiver ligado.

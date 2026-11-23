@@ -1,12 +1,12 @@
 {
   "produto": "WebGuardian",
-  "versao": "1.8.1",
+  "versao": "1.8.2",
   "fonteOficial": "https://github.com/LuizZanchetta/WebGuardian",
   "impressaoDigital": "WG-D0C5-ACA9-5777-6D53-ED11",
-  "assinadoEm": "2026-11-23 17:08",
+  "assinadoEm": "2026-11-23 17:27",
   "arquivos": {
-    "WebGuardian.ps1": "83e9e6dc7ab1f5392c689642806c10d8aa4705b8a0ef8b89d18cadc3f45e8d18",
-    "painel.html": "157a0d1a024211d1d697e9919d3be51be32f99b0a62451236c38fa4e80f19e84",
+    "WebGuardian.ps1": "16523db77d11fe13e1fb32e791d85f39d01e46800c9e328c5a629eb97fed5674",
+    "painel.html": "e6d835f51c833cbc5a920cc88ba6cfd362ad58d005e9aa1fae85192950673c85",
     "INSTALAR WEBGUARDIAN.bat": "6d644298022d636c8b41bfa84a90cd737d264a7ea210a1ba5a086985a121e7d1",
     "ATUALIZAR WEBGUARDIAN.bat": "c6d51d604ac67c941dd9269cebacb1414df67ca12fa0e63fa37b98e5e7588f6b",
     "DESINSTALAR WEBGUARDIAN.bat": "1f7e167d818ba61dae20adb3397f106ec0c6e0d556aaa5ec85534d475e99d550",
@@ -15,6 +15,6 @@
     "app/compilar.ps1": "182719326da62eab3e394f784010fc1b2901c531c42c1b55698ee214f6d6aae1",
     "app/app.manifest": "04118c00329f9152adedf6f40727e6300152bc1b234f741bcb5ea5213289f42e",
     "app/webguardian.ico": "703ef7fcb14b53fb8c7821a9e3d1b1e72b83cedc6d1561c083d4531f56975efb",
-    "ferramentas/assinar-versao.ps1": "65c6d2f21d862a312f00296f3470ba5f16097fc7bd32ec4a4b78dbb2dd76f274"
+    "ferramentas/assinar-versao.ps1": "18aa8bd7e7b01a2cb222e9a21806c52f5f5086eb820a458b7364240d1de667a3"
   }
 }
