@@ -13,6 +13,8 @@
     .\assinar-versao.ps1 -Assinar "<pasta>" ["<pasta2>" ...]   # gera ASSINATURA\manifesto.json e .sig
     .\assinar-versao.ps1 -ExportarBackup "<arquivo>"           # cópia da chave, protegida por uma senha que VOCÊ digita
     .\assinar-versao.ps1 -ImportarBackup "<arquivo>"           # restaura a chave (ex.: depois de formatar o PC)
+    .\assinar-versao.ps1 -PrepararRelease "<pasta do repo>" [-Versao 1.8.1]
+                                                               # notas da release (do CHANGELOG.md) + link já preenchido
 
   Sem a chave privada ninguém consegue gerar uma assinatura que a chave pública oficial
   (embutida no WebGuardian.ps1) aceite. Quem alterar qualquer arquivo e trocar a chave para
@@ -24,7 +26,9 @@ param(
     [Parameter(ParameterSetName = 'Mostrar')][switch]$MostrarChave,
     [Parameter(ParameterSetName = 'Assinar', Mandatory)][string[]]$Assinar,
     [Parameter(ParameterSetName = 'Exportar', Mandatory)][string]$ExportarBackup,
-    [Parameter(ParameterSetName = 'Importar', Mandatory)][string]$ImportarBackup
+    [Parameter(ParameterSetName = 'Importar', Mandatory)][string]$ImportarBackup,
+    [Parameter(ParameterSetName = 'Release', Mandatory)][string]$PrepararRelease,
+    [Parameter(ParameterSetName = 'Release')][string]$Versao
 )
 $ErrorActionPreference = 'Stop'
 $NomeCofre = 'WebGuardian-Assinatura-Oficial'
@@ -139,6 +143,48 @@ switch ($PSCmdlet.ParameterSetName) {
         $t1 = $null; $t2 = $null
         [IO.File]::WriteAllBytes($ExportarBackup, (Protect-Backup ([Text.Encoding]::UTF8.GetBytes($rsa.ToXmlString($true))) $s1))
         Write-Host "Backup criado: $ExportarBackup  (NUNCA coloque este arquivo no GitHub)" -ForegroundColor Green
+    }
+    'Release' {
+        # Notas da release no GitHub: a seção da versão no CHANGELOG.md + como instalar + autenticidade
+        $pasta = (Resolve-Path -LiteralPath $PrepararRelease).Path
+        if (-not $Versao) {
+            $wg = Get-Content -LiteralPath (Join-Path $pasta 'WebGuardian.ps1') -Raw -Encoding UTF8
+            if ($wg -notmatch "(?m)^\`$VersaoGuardiao\s*=\s*'([^']+)'") { throw 'Versao nao encontrada no WebGuardian.ps1' }
+            $Versao = $Matches[1]
+            # Só a versão ATUAL precisa estar assinada nesta pasta (versões antigas: a assinatura está no commit da etiqueta)
+            $conf = Test-Autenticidade (Join-Path $pasta 'ASSINATURA') $pasta
+            if ($conf.estado -ne 'oficial' -or $conf.versao -ne $Versao) { throw "A pasta nao e a versao oficial $Versao assinada ($($conf.estado) $($conf.versao)). Assine antes." }
+        }
+        $log = Get-Content -LiteralPath (Join-Path $pasta 'CHANGELOG.md') -Raw -Encoding UTF8
+        $m = [regex]::Match($log, "(?ms)^## $([regex]::Escape($Versao))\b[^\r\n]*\r?\n(.*?)(?=^## |\z)")
+        if (-not $m.Success) { throw "A versao $Versao nao esta no CHANGELOG.md. Escreva as notas antes." }
+        $notas = $m.Groups[1].Value.Trim()
+        $destaque = ''; if ($notas -match '^\*\*(.+?)\*\*') { $destaque = $Matches[1] }
+        $titulo = "WebGuardian $Versao"; if ($destaque) { $titulo += " - $destaque" }
+        $imp = Get-ImpressaoDigital $ChavePublicaOficial
+        $corpo = @"
+$notas
+
+---
+
+### Como instalar ou atualizar
+1. Em **Assets**, logo abaixo, baixe **Source code (zip)**.
+2. Clique com o botão direito no ZIP → **Propriedades** → marque **Desbloquear** → **OK**. Depois extraia.
+3. Dê dois cliques em **``VERIFICAR AUTENTICIDADE.bat``**. Precisa aparecer **VERSÃO OFICIAL $Versao** e a impressão digital **``$imp``**.
+4. Primeira vez: **``INSTALAR WEBGUARDIAN.bat``**. Já tem o WebGuardian: **``ATUALIZAR WEBGUARDIAN.bat``** (guarda um backup e volta sozinho para a versão anterior se algo der errado).
+
+### Autenticidade
+Versão assinada digitalmente. Impressão digital oficial: **``$imp``**.
+Baixe somente daqui: $FonteOficial
+"@
+        $arq = Join-Path $env:TEMP "WebGuardian-release-v$Versao.md"
+        [IO.File]::WriteAllText($arq, $corpo.Replace("`r`n", "`n"), (New-Object Text.UTF8Encoding $false))
+        $url = "$FonteOficial/releases/new?tag=v$Versao&title=$([uri]::EscapeDataString($titulo))&body=$([uri]::EscapeDataString($corpo.Replace("`r`n", "`n")))"
+        Write-Host "Titulo: $titulo" -ForegroundColor Green
+        Write-Host "Notas:  $arq"
+        Write-Host "Antes de publicar: a etiqueta v$Versao precisa estar no GitHub (git push origin v$Versao)." -ForegroundColor Yellow
+        Write-Host 'Link da release ja preenchida:'
+        Write-Output $url
     }
     'Importar' {
         if (Get-Cofre) { throw 'Este PC ja tem uma chave oficial. Nada foi alterado.' }

@@ -3,7 +3,7 @@
   "versao": "1.8.1",
   "fonteOficial": "https://github.com/LuizZanchetta/WebGuardian",
   "impressaoDigital": "WG-D0C5-ACA9-5777-6D53-ED11",
-  "assinadoEm": "2026-11-23 16:51",
+  "assinadoEm": "2026-11-23 17:08",
   "arquivos": {
     "WebGuardian.ps1": "83e9e6dc7ab1f5392c689642806c10d8aa4705b8a0ef8b89d18cadc3f45e8d18",
     "painel.html": "157a0d1a024211d1d697e9919d3be51be32f99b0a62451236c38fa4e80f19e84",
@@ -15,6 +15,6 @@
     "app/compilar.ps1": "182719326da62eab3e394f784010fc1b2901c531c42c1b55698ee214f6d6aae1",
     "app/app.manifest": "04118c00329f9152adedf6f40727e6300152bc1b234f741bcb5ea5213289f42e",
     "app/webguardian.ico": "703ef7fcb14b53fb8c7821a9e3d1b1e72b83cedc6d1561c083d4531f56975efb",
-    "ferramentas/assinar-versao.ps1": "045e4ec4cdfef250851fe8368d6b3d9db4862efcf72261c5fd3b19c73444e894"
+    "ferramentas/assinar-versao.ps1": "65c6d2f21d862a312f00296f3470ba5f16097fc7bd32ec4a4b78dbb2dd76f274"
   }
 }

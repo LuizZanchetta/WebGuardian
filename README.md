@@ -123,7 +123,8 @@ não ganham passe livre só por serem da Microsoft: o WebGuardian confere o que 
 
 ## Instalação
 
-1. Baixe o projeto: botão verde **Code → Download ZIP**.
+1. Baixe a versão mais recente em **[Releases](https://github.com/LuizZanchetta/WebGuardian/releases/latest)**
+   → **Source code (zip)**. Cada release traz as notas da atualização.
 2. **Antes de extrair:** clique com o botão direito no ZIP → **Propriedades** → marque
    **Desbloquear** → OK. (Arquivos baixados vêm bloqueados pelo Windows.)
 3. Extraia para uma pasta sua (ex.: `Documentos\WebGuardian`). **Guarde essa pasta**: ela é
@@ -200,7 +201,8 @@ tamanho do disco para a completa).
 
 ## Atualizar
 
-Baixe a versão nova **daqui**, extraia (lembre de **Desbloquear** o ZIP) e dê dois cliques em
+Baixe a versão nova em **[Releases](https://github.com/LuizZanchetta/WebGuardian/releases/latest)**
+(o que mudou está nas notas de cada release e no [CHANGELOG](CHANGELOG.md)), extraia (lembre de **Desbloquear** o ZIP) e dê dois cliques em
 **`ATUALIZAR WEBGUARDIAN.bat`**. Ele confere a assinatura oficial (recusa cópia alterada), mostra a versão instalada e a nova, guarda um backup em
 `C:\ProgramData\Guardiao\backup\` e, se a versão nova não iniciar, **volta sozinho para a
 anterior**. Quem tinha o "Guardião" (até 1.6.1) é atualizado normalmente: os atalhos antigos
@@ -304,6 +306,7 @@ INSTALAR WEBGUARDIAN.bat     instala (pede Administrador)
 ATUALIZAR WEBGUARDIAN.bat    aplica uma versão nova, com backup e volta automática
 DESINSTALAR WEBGUARDIAN.bat  remove (pede a senha do dono)
 VERIFICAR AUTENTICIDADE.bat  confere se a cópia é a versão oficial (sem Administrador)
+CHANGELOG.md                 notas de atualização de cada versão (as mesmas das Releases)
 ASSINATURA/                  manifesto com o SHA-256 de cada arquivo + assinatura digital oficial
 ferramentas/assinar-versao.ps1  usado só pelo mantenedor para assinar versões (a chave privada não está aqui)
 app/WebGuardianApp.cs        código do app WebGuardian.exe (C#, .NET Framework 4.8)
@@ -319,6 +322,8 @@ powershell -ExecutionPolicy Bypass -File app\compilar.ps1
 ```
 
 ## Histórico de versões
+
+Notas completas de cada versão: [CHANGELOG](CHANGELOG.md) e [Releases](https://github.com/LuizZanchetta/WebGuardian/releases).
 
 - **1.8.1** — compatível com outros antivírus (Avast, AVG, Norton…): sem alarme falso de
   "Defender desligado", painel mostra o antivírus ativo, downloads conferidos pelo antivírus
