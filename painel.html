@@ -363,6 +363,12 @@ td.dim{color:var(--t3)}
   .status .r{margin-left:0}
 }
 @media (max-width:640px){
+  .sec-t{flex-wrap:wrap;padding-top:8px;padding-bottom:8px}
+  .sec-t .end:not(.sub){margin-left:0;width:100%;flex-wrap:wrap}
+  .alert{flex-wrap:wrap}
+  #nova-versao-link{margin-left:0 !important}
+  #conf-lista li{grid-template-columns:20px minmax(0,1fr)}
+  #conf-lista li .btn{grid-column:2;justify-self:start}
   .posture{grid-template-columns:minmax(0,1fr);padding:20px 16px 16px 20px}
   .posture .acts{grid-column:1}
   .posture .acts .btn{flex:1 1 100%}
@@ -446,6 +452,7 @@ td.dim{color:var(--t3)}
 <main class="page" id="conteudo">
   <div class="alert bad" id="offline" role="alert"><svg class="i"><use href="#i-alert"/></svg>O painel perdeu contato com o WebGuardian. Feche esta janela e abra de novo pelo app WebGuardian.</div>
   <div class="alert bad" id="nao-oficial" role="alert"><svg class="i"><use href="#i-shield-x"/></svg><span id="nao-oficial-txt"></span></div>
+  <div class="alert info" id="nova-versao" role="status"><svg class="i"><use href="#i-rocket"/></svg><span id="nova-versao-txt"></span><a id="nova-versao-link" target="_blank" rel="noopener noreferrer" style="margin-left:auto;color:inherit;font-weight:600">Ver no GitHub oficial</a></div>
   <div class="alert info" id="scan" role="status"><span class="spin" id="scan-spin" aria-hidden="true"></span>
     <div class="scan-c"><span id="scan-txt"></span><span class="pbar" aria-hidden="true"><i id="scan-bar"></i></span></div>
     <b class="pct" id="scan-pct"></b></div>
@@ -597,10 +604,15 @@ td.dim{color:var(--t3)}
   <div class="view" id="v-historico" data-aba="historico">
     <div class="g"><section class="s16" aria-labelledby="h-hist">
       <div class="sec-t"><h2 id="h-hist">Histórico de decisões</h2><span class="badge" id="n-hist">0</span>
-        <span class="end"><button class="btn ghost" data-acao="limparHistorico" id="b-limpar-hist">Limpar lista</button></span></div>
-      <div class="scroll" style="max-height:calc(100vh - 260px)"><table>
+        <span class="end"><button class="btn ghost" data-acao="exportar" id="b-exportar"><svg class="i"><use href="#i-download"/></svg>Exportar relatório</button><button class="btn ghost" data-acao="limparHistorico" id="b-limpar-hist">Limpar lista</button></span></div>
+      <div class="scroll" style="max-height:calc(100vh - 360px)"><table>
         <colgroup><col style="width:80px"><col><col style="width:150px"><col class="col-when-h" style="width:140px"></colgroup>
         <thead><tr><th>Item</th><th>Alvo</th><th>Decisão</th><th class="col-when-h">Quando</th></tr></thead><tbody id="hist"></tbody></table></div>
+    </section>
+    <section class="s16" aria-labelledby="h-conf">
+      <div class="sec-t"><h2 id="h-conf">Programas confiáveis</h2><span class="badge" id="n-conf">0</span>
+        <span class="end sub">Os que você liberou. Vale só para o mesmo arquivo: se ele for trocado, volta a ser vigiado.</span></div>
+      <ul class="dls" id="conf-lista"></ul>
     </section></div>
   </div>
 </main>
@@ -632,16 +644,24 @@ const TIPOS = {
   Servico:{nome:'Serviço novo',ic:'i-gear',camada:2}, Tarefa:{nome:'Tarefa agendada',ic:'i-clock',camada:2},
   Inicializacao:{nome:'Inicialização automática',ic:'i-rocket',camada:2},
   Arquivo:{nome:'Download suspeito',ic:'i-download',camada:2},
-  Ameaca:{nome:'Ameaça detectada pelo Defender',ic:'i-shield-x',camada:2}
+  Ameaca:{nome:'Ameaça detectada pelo Defender',ic:'i-shield-x',camada:2},
+  Proxy:{nome:'Proxy configurado',ic:'i-globe',camada:3}, Hosts:{nome:'Arquivo hosts alterado',ic:'i-globe',camada:3},
+  DNS:{nome:'DNS trocado',ic:'i-globe',camada:3}, RDP:{nome:'Acesso remoto ligado',ic:'i-unplug',camada:3},
+  Firewall:{nome:'Regra de firewall nova',ic:'i-lock',camada:3}
 };
-const CAMADA_NOME = {1:'Logons', 2:'Programas'};
+const CAMADA_NOME = {1:'Logons', 2:'Programas', 3:'Rede'};
 const LIBERAR = {
   IP:'Remove o bloqueio do firewall. Esse endereço volta a poder se conectar ao seu PC.',
   Processo:'Descongela o programa e devolve o acesso dele à internet.', Usuario:'Reativa a conta de usuário.',
   Administrador:'Devolve essa conta ao grupo Administradores.', Servico:'Reativa o serviço como estava antes.',
   Tarefa:'Reativa a tarefa agendada.', Inicializacao:'Recoloca o programa para iniciar com o Windows.',
   Arquivo:'Devolve o arquivo baixado para a pasta de onde ele saiu. Só libere se você confia na origem.',
-  Ameaca:'Só libere se tiver CERTEZA de que é alarme falso. O Windows Defender passa a permitir essa ameaça neste PC e devolve o arquivo da quarentena dele para o lugar de antes.'
+  Ameaca:'Só libere se tiver CERTEZA de que é alarme falso. O Windows Defender passa a permitir essa ameaça neste PC e devolve o arquivo da quarentena dele para o lugar de antes.',
+  Proxy:'Aceita o proxy novo: todo o acesso à internet volta a passar por ele. Só libere se foi você (ou o seu trabalho/escola) que configurou.',
+  Hosts:'Devolve as linhas novas ao arquivo hosts. Só libere se foi você (ou um programa que você conhece, como um bloqueador de anúncios).',
+  DNS:'Aceita o DNS novo. Só libere se foi você que trocou (ex.: 1.1.1.1 ou 8.8.8.8).',
+  RDP:'Liga de novo o acesso remoto a este PC. Só libere se você usa a Área de Trabalho Remota.',
+  Firewall:'Reativa a regra que libera a entrada de conexões para esse programa.'
 };
 const APAGAR = {
   IP:'O endereço fica bloqueado para sempre no firewall.',
@@ -650,11 +670,14 @@ const APAGAR = {
   Servico:'Remove o serviço do Windows e apaga o arquivo que ele executava.', Tarefa:'Exclui a tarefa agendada e apaga o arquivo que ela executava.',
   Inicializacao:'Apaga o arquivo que tentava iniciar com o Windows.',
   Arquivo:'Apaga de vez o arquivo baixado que está na quarentena.',
-  Ameaca:'Se a ameaça ainda estiver ativa, o Defender a remove. Se já estiver na quarentena dele, ela continua presa lá, criptografada e sem poder rodar, até o Defender apagá-la sozinho.'
+  Ameaca:'Se a ameaça ainda estiver ativa, o Defender a remove. Se já estiver na quarentena dele, ela continua presa lá, criptografada e sem poder rodar, até o Defender apagá-la sozinho.',
+  Proxy:'A mudança continua desfeita: o proxy fica como estava antes.', Hosts:'As linhas novas continuam fora do arquivo hosts.',
+  DNS:'O DNS continua como estava antes.', RDP:'O acesso remoto continua desligado.', Firewall:'Apaga a regra do firewall.'
 };
 const CONFIRMA = {
   scanOffline:['Reiniciar e verificar offline?','O computador vai reiniciar agora e o Defender analisa tudo antes do Windows carregar, em cerca de 15 minutos. Salve seus arquivos antes.','Reiniciar agora',true,'i-rocket',{foco:'sim'}],
   isolarRede:['Desconectar da internet?','Wi-Fi e cabo serão desligados. Ninguém de fora acessa o PC até você reconectar por este painel.','Desconectar agora',true,'i-unplug',{foco:'sim'}],
+  removerConfiavel:['Tirar dos confiáveis?','O programa volta a ser vigiado normalmente e pode ser isolado de novo se parecer suspeito.','Tirar da lista',false,'i-shield'],
   limparHistorico:['Limpar o histórico?','Remove da lista os itens já liberados ou apagados. Os pendentes continuam.','Limpar histórico',false,'i-history'],
   limparAmeacas:['Limpar a lista de ameaças?','Esconde daqui as ameaças já detectadas. O Windows Defender continua guardando o histórico oficial em Segurança do Windows › Histórico de proteção. Ameaças novas voltam a aparecer normalmente.','Limpar lista',false,'i-trash'],
   limparDownloads:['Limpar a lista de downloads?','Apaga só a lista de downloads já conferidos. Os arquivos continuam onde estão, e downloads em verificação não são afetados.','Limpar lista',false,'i-trash'],
@@ -671,7 +694,8 @@ const ACENTOS = Object.entries({ Verificacao:'Verificação', verificacao:'verif
   ameaca:'ameaça', ameacas:'ameaças', AMEACA:'AMEAÇA', Concluida:'Concluída', ultima:'última', tipico:'típico', Ja:'Já', NAO:'NÃO',
   Previsao:'Previsão', previsao:'previsão', so:'só', Nao:'Não', automatica:'automática', Area:'Área',
   possivel:'possível', codigo:'código', Atualizacao:'Atualização', atualizacao:'atualização', automatica:'automática', padrao:'padrão',
-  nivel:'nível', mudanca:'mudança', Conexao:'Conexão', conexao:'conexão', usuario:'usuário', protecao:'proteção', apos:'após', antivirus:'antivírus', propria:'própria' }).map(([k, v]) => [new RegExp('\\b' + k + '\\b', 'g'), v]);
+  nivel:'nível', mudanca:'mudança', Conexao:'Conexão', conexao:'conexão', usuario:'usuário', protecao:'proteção', apos:'após', antivirus:'antivírus', propria:'própria', Relatorio:'Relatório', relatorio:'relatório', decisoes:'decisões',
+  confiaveis:'confiáveis', invalido:'inválido' }).map(([k, v]) => [new RegExp('\\b' + k + '\\b', 'g'), v]);
 const acentuar = t => ACENTOS.reduce((s, [r, v]) => s.replace(r, v), String(t || ''));
 
 const $ = id => document.getElementById(id);
@@ -707,6 +731,7 @@ function rel(s) {
 }
 function severidade(it) {
   if (it.tipo === 'Ameaca' && /ATIVA/.test(it.motivo)) return ['Crítica', 'bad', 3];
+  if (it.tipo === 'RDP' || it.tipo === 'Proxy' || it.tipo === 'Hosts') return ['Crítica', 'bad', 3];
   if (it.tipo === 'IP' && /BEM-SUCEDIDO/i.test(it.motivo)) return ['Crítica', 'bad', 3];
   if (it.tipo === 'IP') return ['Média', 'warn', 1];
   return ['Alta', 'bad', 2];
@@ -825,7 +850,7 @@ function renderFila(pend) {
     body.append(top, el('div','q-alvo', it.alvo), el('p','q-why', it.motivo));
     const acts = el('div','q-acts'), tm = el('time','q-time', rel(it.quando)); tm.title = curta(it.quando);
     const bl = el('button','btn'); bl.append(icon('i-undo'), 'Liberar');
-    bl.onclick = async () => { if (await confirmar('Liberar este item?', it.alvo, LIBERAR[it.tipo] || 'Desfaz o isolamento.', 'Liberar item', false, 'i-undo')) executar('liberar', it.id, bl); };
+    bl.onclick = async () => { if (await confirmar('Liberar este item?', it.alvo, (LIBERAR[it.tipo] || 'Desfaz o isolamento.') + ' Depois, confirme na janela do Windows que vai aparecer.', 'Liberar item', false, 'i-undo')) executar('liberar', it.id, bl); };
     const ba = el('button','btn danger'); ba.append(icon('i-trash'), 'Apagar ameaça');
     ba.onclick = async () => { if (await confirmar('Apagar esta ameaça?', it.alvo, (APAGAR[it.tipo] || '') + ' Não dá para desfazer.', 'Apagar ameaça', true, 'i-trash')) executar('apagar', it.id, ba); };
     acts.append(tm, bl, ba); row.append(piw, body, acts); f.append(row);
@@ -938,9 +963,10 @@ function render(s) {
   const pendL = pend.filter(i => (TIPOS[i.tipo] || {}).camada === 1).length, pendP = pend.filter(i => (TIPOS[i.tipo] || {}).camada === 2).length;
   camada(1, pendL ? 'bad' : 'ok', pendL ? plural(pendL, 'isolado', 'isolados') : 'Vigiando');
   camada(2, pendP ? 'bad' : (susp.length ? 'warn' : 'ok'), pendP ? plural(pendP, 'isolado', 'isolados') : (susp.length ? plural(susp.length, 'suspeito', 'suspeitos') : 'Vigiando'));
-  camada(3, s.redeIsolada ? 'bad' : 'ok', s.redeIsolada ? 'Desligada' : 'Conectada');
+  const pendR = pend.filter(i => (TIPOS[i.tipo] || {}).camada === 3).length;   // proxy, hosts, DNS, RDP, firewall
+  camada(3, s.redeIsolada || pendR ? 'bad' : 'ok', s.redeIsolada ? 'Desligada' : pendR ? plural(pendR, 'isolado', 'isolados') : 'Conectada');
   camada(4, prot ? (desat ? 'warn' : 'ok') : 'bad', prot ? (desat ? 'Desatualizado' : (outro ? outro.nome : 'Defender ativo')) : 'Desligado');
-  const ruins = [pendL, pendP || susp.length, s.redeIsolada, !prot || desat].filter(Boolean).length;
+  const ruins = [pendL, pendP || susp.length, s.redeIsolada || pendR, !prot || desat].filter(Boolean).length;
   $('cam-r').textContent = ruins ? ruins + ' de 4 pedem atenção' : '4 de 4 em ordem';
 
   renderFila(pend);
@@ -1042,6 +1068,23 @@ function render(s) {
     tr.append(td('#' + h.id, 'mono dim'), it, dc, qd); th.append(tr);
   }
   if (!hist.length) emptyRow(th, 4, 'Nenhuma decisão tomada ainda.');
+
+  // Programas confiáveis (os que você liberou): dá para tirar da lista
+  const cf = list(s.confiaveis), cl = $('conf-lista'); cl.replaceChildren();
+  $('n-conf').textContent = cf.length;
+  cf.forEach((c, i) => {
+    const li = el('li'), di = el('span', 'di ok'); di.append(icon('i-shield-ok'));
+    const meio = el('div'), nm = el('div', 'nm', String(c.caminho || '').split('\\').pop()); nm.title = c.caminho || '';
+    meio.append(nm, el('div', 'sub', (c.caminho || '') + (c.desde ? ' · desde ' + curta(c.desde.slice(8, 10) + '/' + c.desde.slice(5, 7) + '/' + c.desde.slice(0, 4) + ' ' + c.desde.slice(11, 16)).toLowerCase() : '')));
+    const b = el('button', 'btn ghost', 'Tirar da lista'); b.dataset.acao = 'removerConfiavel'; b.dataset.id = String(i);
+    li.append(di, meio, b); cl.append(li);
+  });
+  if (!cf.length) cl.append(el('li', 'empty', 'Nenhum programa confiável ainda. Quando você libera um programa isolado, ele aparece aqui.'));
+
+  // Versão nova no GitHub oficial (o WebGuardian só avisa; quem decide atualizar é você)
+  const nv = s.novaVersao;
+  $('nova-versao').style.display = nv ? 'flex' : 'none';
+  if (nv) { $('nova-versao-txt').textContent = 'WebGuardian ' + nv.versao + ' disponível. Baixe só do GitHub oficial e rode o ATUALIZAR WEBGUARDIAN.bat.'; $('nova-versao-link').href = 'https://github.com/LuizZanchetta/WebGuardian/releases/latest'; }
 }
 
 let ocupado = false;

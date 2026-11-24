@@ -41,6 +41,10 @@ Depois de baixar, siga a [Instalação](#instalação).
 | Tarefa agendada, serviço ou programa de inicialização novo e suspeito | Desativa / remove (guarda backup para desfazer) |
 | **Qualquer arquivo baixado** (inclusive instaladores) | Passa pelas regras contra golpes e pelo Windows Defender assim que termina de baixar |
 | Windows Defender desligado, ameaça detectada, log de segurança apagado | Alerta |
+| **Proxy** configurado, linhas novas no arquivo **hosts**, **DNS** trocado à mão, **acesso remoto (RDP)** ligado (truques para desviar você a sites falsos ou abrir o PC ao invasor) | **Desfaz na hora** e pergunta: Liberar (aceitar) ou Apagar (manter desfeito) |
+| Regra nova no **firewall** liberando entrada para programa suspeito | Desativa a regra |
+| **Extensão nova** no Edge, Chrome, Brave, Opera ou Firefox | Alerta com o nome da extensão |
+| **Pendrive, celular ou teclado USB** conectado pela primeira vez | Alerta (teclado novo é alerta crítico: pode ser um pendrive que digita comandos) |
 
 ### Verificação de downloads
 O WebGuardian vigia a pasta **Downloads** (todos os arquivos) e também a **Área de Trabalho**
@@ -169,7 +173,7 @@ Abra pelo atalho **WebGuardian** ou dê dois cliques no **escudo perto do relóg
 | **Atividade** | Tudo o que o WebGuardian registrou **desde que o PC foi ligado** |
 | **Conexões** | Programas conectados à internet agora (suspeitos em destaque) |
 | **Antivírus** | Antivírus ativo (Defender ou outro, como o Avast), base de ameaças, proteções extras, verificações, ameaças e downloads verificados |
-| **Histórico** | Decisões já tomadas |
+| **Histórico** | Decisões já tomadas, **Exportar relatório** (HTML para salvar em PDF + planilha CSV na Área de Trabalho) e a lista de **programas confiáveis** (os que você liberou; vale só para o mesmo arquivo) |
 
 ### Atividade por sessão: quem acessou a máquina
 Cada vez que o PC é **ligado**, a atividade começa do zero: a da sessão anterior é
@@ -215,7 +219,10 @@ tamanho do disco para a completa).
 
 Baixe a versão nova em **[Releases](https://github.com/LuizZanchetta/WebGuardian/releases/latest)**
 (o que mudou está nas notas de cada release e no [CHANGELOG](CHANGELOG.md)), extraia (lembre de **Desbloquear** o ZIP) e dê dois cliques em
-**`ATUALIZAR WEBGUARDIAN.bat`**. Ele confere a assinatura oficial (recusa cópia alterada), mostra a versão instalada e a nova, guarda um backup em
+**`ATUALIZAR WEBGUARDIAN.bat`**. A partir da 2.0, quem confere a assinatura da versão nova é o
+**WebGuardian já instalado** (que fica numa pasta protegida): ele mostra uma janela do Windows com
+a versão e a assinatura conferida e só atualiza se você clicar em **Confirmar**. Uma cópia
+adulterada é recusada sem nem perguntar. A atualização mostra a versão instalada e a nova, guarda um backup em
 `C:\ProgramData\Guardiao\backup\` e, se a versão nova não iniciar, **volta sozinho para a
 anterior**. Quem tinha o "Guardião" (até 1.6.1) é atualizado normalmente: os atalhos antigos
 viram **WebGuardian** e histórico, quarentena e bloqueios são mantidos.
@@ -288,8 +295,15 @@ repositório para avisar.
 - A janela do app roda como **usuário comum** e entra com um **código de uso único**
   (válido por 60 s); a chave não fica no histórico.
 - O app só aceita links do próprio PC no formato esperado.
-- Nenhum dado seu é enviado para a internet. A única comunicação externa é a atualização da
-  base do próprio Windows Defender, feita pelo Windows.
+- **Ações sensíveis pedem confirmação numa janela do Windows** aberta pelo próprio WebGuardian
+  (que roda como Administrador): **Liberar** itens isolados, **reconectar** a internet e **baixar**
+  proteções do Defender. O Windows não deixa um programa comum clicar numa janela de
+  Administrador, então um vírus no seu usuário não consegue se liberar sozinho. Sem resposta em
+  1 minuto, a janela cancela.
+- Nenhum dado seu é enviado para a internet. As únicas comunicações externas são a atualização da
+  base do próprio Windows Defender, feita pelo Windows, e **uma consulta por dia** à página pública
+  de Releases do GitHub oficial, para avisar quando sai versão nova (só lê; nada é enviado e nada é
+  instalado sozinho).
 - Configurações de segurança do Windows (proteções extras do Defender) só mudam quando
   **você** clica no botão correspondente.
 
@@ -337,7 +351,9 @@ powershell -ExecutionPolicy Bypass -File app\compilar.ps1
 
 Notas completas de cada versão: [CHANGELOG](CHANGELOG.md) e [Releases](https://github.com/LuizZanchetta/WebGuardian/releases).
 
-- **2.0.0** — visual novo do painel (só estética; o funcionamento é o mesmo da 1.9.1).
+- **2.0.0** — visual novo do painel; confirmação pelo Windows para ações sensíveis; atualização
+  conferida pela cópia instalada; vigia proxy, hosts, DNS, acesso remoto, firewall, extensões de
+  navegador e dispositivos USB; aviso de versão nova; relatório exportável; programas confiáveis.
 - **1.9.1** — detecção de conexões: portas dos fundos, tentativas de conexão, número de processo
   reaproveitado e programa trocado; sem alarme falso com rede de casa e VPN.
 - **1.9.0** — ameaças detectadas pelo Defender aparecem na aba **Decisões**: liberar (alarme

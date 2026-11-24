@@ -60,7 +60,8 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
-$VersaoGuardiao = '2.0.0'   # 2.0.0: painel com visual novo (atualização só estética)
+$VersaoGuardiao = '2.0.0'   # 2.0.0: painel novo; confirmação do Windows para ações sensíveis; atualização conferida pela cópia
+                            #        instalada; proxy/hosts/DNS/RDP/firewall; extensões; USB; aviso de versão; relatório; confiáveis
                             # 1.9.1: detecção de conexões: portas dos fundos, tentativas de conexão, número de processo
                             #        reaproveitado, programa trocado; sem alarme falso com rede de casa/VPN
                             # 1.9.0: ameaças detectadas pelo Defender na aba Decisões (liberar ou apagar)
@@ -313,6 +314,42 @@ function Test-IpPrivado([string]$Ip) {
 }
 
 $script:CacheAssinatura = @{}
+
+# ---------------- Programas confiáveis (os que você liberou; editável no painel) ----------------
+# Guarda caminho + SHA-256: se o arquivo for trocado por outro no mesmo lugar, a confiança deixa de valer.
+$ArqConfiaveis = Join-Path $Pasta 'confiaveis.json'
+function Get-Confiaveis {
+    if (-not (Test-Path $ArqConfiaveis)) { return @() }
+    try { $l = Get-Content $ArqConfiaveis -Raw -Encoding UTF8 | ConvertFrom-Json; return @($l | Where-Object { $_ }) } catch { return @() }
+}
+function Save-Confiaveis($Lista) {
+    ConvertTo-Json -InputObject @($Lista) -Depth 3 | Set-Content $ArqConfiaveis -Encoding UTF8
+    $script:CacheAssinatura = @{}   # reavalia tudo com a lista nova
+}
+function Add-Confiavel([string]$Caminho, [string]$Motivo) {
+    if (-not $Caminho -or -not (Test-Path -LiteralPath $Caminho -PathType Leaf)) { return $false }
+    $h = (Get-FileHash -LiteralPath $Caminho -Algorithm SHA256).Hash
+    $l = @(Get-Confiaveis | Where-Object { $_.caminho -ne $Caminho })
+    $l += [pscustomobject]@{ caminho = $Caminho; sha256 = $h; desde = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); motivo = $Motivo }
+    Save-Confiaveis $l
+    Write-Log 'INFO' "Programa adicionado aos confiaveis: $Caminho"
+    return $true
+}
+function Remove-Confiavel([int]$Indice) {
+    $l = @(Get-Confiaveis)
+    if ($Indice -lt 0 -or $Indice -ge $l.Count) { return 'Item nao encontrado na lista de confiaveis.' }
+    $sai = $l[$Indice].caminho
+    Save-Confiaveis @($l | Where-Object { $_.caminho -ne $sai })
+    Write-Log 'INFO' "Programa removido dos confiaveis: $sai"
+    return "Removido dos confiaveis: $([IO.Path]::GetFileName($sai)). Ele volta a ser vigiado normalmente."
+}
+function Test-Confiavel([string]$Caminho) {
+    if (-not $Caminho) { return $false }
+    $e = @(Get-Confiaveis | Where-Object { $_.caminho -eq $Caminho })
+    if (-not $e.Count) { return $false }
+    try { return ((Get-FileHash -LiteralPath $Caminho -Algorithm SHA256).Hash -eq $e[0].sha256) } catch { return $false }
+}
+
 function Get-ChaveArquivo([string]$Caminho) {
     # caminho + data + tamanho: identifica ESTE arquivo (outro arquivo no mesmo lugar = outra chave)
     try { $fi = [IO.FileInfo]$Caminho; if ($fi.Exists) { return "$Caminho|$($fi.LastWriteTimeUtc.Ticks)|$($fi.Length)" } } catch { }
@@ -331,6 +368,7 @@ function Test-Suspeito([string]$Caminho) {
         try { $assinado = ((Get-AuthenticodeSignature -LiteralPath $Caminho).Status -eq 'Valid') } catch { }
     }
     $res = ($emPasta -and -not $assinado)
+    if ($res -and (Test-Confiavel $Caminho)) { $res = $false }   # você liberou ESTE arquivo antes (mesmo SHA-256)
     $script:CacheAssinatura[$chave] = $res
     return $res
 }
@@ -1186,6 +1224,12 @@ function Undo-Item($Item) {
                           }
                           if ($volta.Count) { return "ameaca permitida no Defender e arquivo devolvido ($($volta -join ', '))" }
                           return 'ameaca permitida no Defender (nao havia copia na quarentena para devolver)' }
+        # Mudanças de configuração revertidas pelo WebGuardian: Liberar = aceitar a mudança (aplica de novo)
+        'Proxy'         { Set-ConfigProxy $d.Novo; Update-BaseConfig; return 'proxy novo aceito e aplicado' }
+        'Hosts'         { Copy-Item -LiteralPath $d.Novo -Destination $ArqHosts -Force -ErrorAction Stop; Update-BaseConfig; return 'arquivo hosts novo aceito e aplicado' }
+        'RDP'           { Set-ItemProperty -Path $ChaveRdp -Name fDenyTSConnections -Value 0 -ErrorAction Stop; Update-BaseConfig; return 'acesso remoto (RDP) ligado' }
+        'DNS'           { Set-DnsInterface $d.Interface $d.Novo; Update-BaseConfig; return "DNS novo aceito ($($d.Novo))" }
+        'Firewall'      { Enable-NetFirewallRule -Name $d.Regra -ErrorAction Stop; return 'regra de firewall reativada' }
     }
 }
 
@@ -1222,13 +1266,18 @@ function Remove-Ameaca($Item) {
                           $extra = @()
                           foreach ($a in @($d.Arquivos)) {
                               if (-not $a -or -not (Test-Path -LiteralPath $a)) { continue }
-                              try { Start-MpScan -ScanType CustomScan -ScanPath $a -ErrorAction Stop } catch { }   # o Defender neutraliza o que sobrou
-                              if (Test-Path -LiteralPath $a) { $extra += (Remove-ArquivoSeguro $a) }
+                              $extra += (Remove-ArquivoSeguro $a)
+                              Start-ScanDefender $a   # em segundo plano: o monitor não fica travado esperando
                           }
                           $txt = 'ameaca eliminada: fica presa na quarentena do Defender (criptografada, nao roda) ate ele apagar sozinho'
                           if ($ativa) { $txt = 'ameaca ativa removida pelo Defender' }
                           if ($extra.Count) { $txt += '; ' + ($extra -join '; ') }
                           return $txt }
+        'Proxy'         { return 'mudanca de proxy mantida desfeita' }
+        'Hosts'         { return 'mudanca no arquivo hosts mantida desfeita' }
+        'RDP'           { return 'acesso remoto (RDP) mantido desligado' }
+        'DNS'           { return 'DNS mantido como antes' }
+        'Firewall'      { Remove-NetFirewallRule -Name $d.Regra -ErrorAction SilentlyContinue; return 'regra de firewall removida' }
     }
     return 'nada a fazer'
 }
@@ -1241,7 +1290,11 @@ function Invoke-AcaoItem([string]$Acao, [string]$Id) {
         try {
             switch ($Acao) {
                 'liberar'   { $u = @(Undo-Item $i) | Where-Object { $_ -is [string] } | Select-Object -Last 1
-                              $i.Estado = 'LIBERADO'; $r = 'isolamento desfeito'; if ($u) { $r = $u } }
+                              $i.Estado = 'LIBERADO'; $r = 'isolamento desfeito'; if ($u) { $r = $u }
+                              # Você disse que o programa é seguro: ele entra na lista de confiáveis (só ESTE arquivo, pelo SHA-256)
+                              $exeConf = switch ("$($i.Tipo)") { 'Processo' { $i.Desfazer.Caminho } 'Servico' { $i.Desfazer.Exe } 'Tarefa' { $i.Desfazer.Exe }
+                                                                 'Inicializacao' { Get-ExeDeComando $i.Desfazer.Valor } default { $null } }
+                              if ($exeConf) { try { if (Add-Confiavel "$exeConf" "Liberado por voce (#$($i.Id) $($i.Tipo))") { $r += '; programa adicionado aos confiaveis' } } catch { } } }
                 'apagar'    { $r = Remove-Ameaca $i; $i.Estado = 'APAGADO' }
                 'confirmar' { $i.Estado = 'AMEACA CONFIRMADA'; $r = 'mantido isolado' }
             }
@@ -1475,6 +1528,7 @@ function Get-Classificacao([string]$Exe, [string]$Argumentos, [string]$ClassId) 
     }
     $arq = Resolve-Programa $Exe
     if ($texto -match $PadraoAtaque) { return @{ Nivel = 'isolar'; Arquivo = $arq; Motivo = 'comando com padrao de ataque (download, codigo escondido ou script remoto)' } }
+    if (Test-Confiavel $arq) { return @{ Nivel = 'assinado'; Arquivo = $arq; Motivo = 'na sua lista de programas confiaveis' } }
     if (Test-Suspeito $arq) { return @{ Nivel = 'isolar'; Arquivo = $arq; Motivo = 'programa sem assinatura em pasta suspeita' } }
     $ed = Get-Editor $arq
     $nome = [IO.Path]::GetFileName("$arq").ToLower()
@@ -1641,6 +1695,340 @@ function Test-Defender {
     } catch { }
 }
 
+# ===================== CONFIRMAÇÃO PELO WINDOWS (ações sensíveis) =====================
+# Aberta pelo PRÓPRIO monitor, que roda como Administrador. O Windows não deixa um programa comum clicar nem
+# digitar numa janela de Administrador: um vírus que consiga a chave do painel não consegue confirmar sozinho.
+function Confirm-NoWindows([string]$Titulo, [string]$Texto) {
+    try {
+        Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+        $f = New-Object System.Windows.Forms.Form
+        $f.Text = 'WebGuardian - confirme'; $f.TopMost = $true; $f.StartPosition = 'CenterScreen'
+        $f.FormBorderStyle = 'FixedDialog'; $f.MinimizeBox = $false; $f.MaximizeBox = $false; $f.ShowInTaskbar = $true
+        $f.ClientSize = New-Object System.Drawing.Size(520, 250); $f.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+        $f.Icon = [System.Drawing.SystemIcons]::Shield
+        $lb = New-Object System.Windows.Forms.Label
+        $lb.Text = "$Titulo`n`n$Texto`n`nSe nao foi voce quem pediu isso agora no painel do WebGuardian, clique em Cancelar."
+        $lb.SetBounds(18, 14, 484, 180); $f.Controls.Add($lb)
+        $ok = New-Object System.Windows.Forms.Button; $ok.Text = 'Confirmar'; $ok.SetBounds(292, 204, 104, 32)
+        $ok.DialogResult = [System.Windows.Forms.DialogResult]::Yes; $f.Controls.Add($ok)
+        $no = New-Object System.Windows.Forms.Button; $no.Text = 'Cancelar'; $no.SetBounds(404, 204, 98, 32)
+        $no.DialogResult = [System.Windows.Forms.DialogResult]::Cancel; $f.Controls.Add($no)
+        $f.AcceptButton = $no; $f.CancelButton = $no   # Enter e Esc cancelam: confirmar exige clicar
+        $t = New-Object System.Windows.Forms.Timer; $t.Interval = 60000   # sem resposta em 1 minuto: cancela
+        $t.add_Tick({ $f.DialogResult = [System.Windows.Forms.DialogResult]::Cancel }.GetNewClosure()); $t.Start()
+        $f.add_Shown({ $f.Activate(); $no.Focus() }.GetNewClosure())
+        [console]::Beep(900, 200)
+        $r = $f.ShowDialog(); $t.Stop(); $t.Dispose(); $f.Dispose()
+        return ($r -eq [System.Windows.Forms.DialogResult]::Yes)
+    } catch { Write-Log 'ALERTA' "Confirmacao do Windows falhou: $_"; return $false }
+}
+function Get-TextoConfirmacao([string]$Acao, [string]$Id) {
+    # Devolve o texto da confirmação, ou $null se a ação não precisa dela
+    switch ($Acao) {
+        'liberar' {
+            $alvo = @(Get-Quarentena | Where-Object { $_.Estado -eq 'ISOLADO' -and ($Id -eq 'todos' -or "$($_.Id)" -eq $Id) })
+            if (-not $alvo.Count) { return $null }
+            $lista = ($alvo | Select-Object -First 4 | ForEach-Object { "#$($_.Id) $($_.Tipo): $($_.Alvo)" }) -join "`n"
+            if ($alvo.Count -gt 4) { $lista += "`n... e mais $($alvo.Count - 4)" }
+            return "Liberar $($alvo.Count) item(ns) isolado(s)?`n$lista" }
+        'restaurarRede' { return 'Reconectar este PC a internet (religar Wi-Fi e cabo)?' }
+        'pua'   { if ($Id -ne 'ligar') { return 'Desligar o BLOQUEIO de aplicativos indesejados do Defender (voltar ao modo so registro)?' } }
+        'nuvem' { if ($Id -ne 'alto') { return 'Baixar o bloqueio na nuvem do Defender para o nivel padrao?' } }
+    }
+    return $null
+}
+
+# ============ TRUQUES DE GOLPE NA CONFIGURAÇÃO: proxy, arquivo hosts, DNS, acesso remoto, firewall ============
+# Desviam você para sites falsos ou abrem a porta para o invasor. A mudança é DESFEITA na hora e vira decisão:
+# Liberar = aceitar a mudança (aplica de novo); Apagar ameaça = manter desfeita.
+$ArqBaseConfig = Join-Path $Pasta 'config_base.json'
+$ArqHosts = Join-Path $env:windir 'System32\drivers\etc\hosts'
+$ChaveProxy = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
+$ChaveRdp = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
+$ChaveDns = 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces'
+$PastaCopiasConfig = Join-Path $Pasta 'config-copias'
+
+function Get-ConfigProxy {
+    $p = Get-ItemProperty -Path $ChaveProxy -ErrorAction SilentlyContinue
+    return [ordered]@{ ProxyEnable = [int]$p.ProxyEnable; ProxyServer = "$($p.ProxyServer)"; AutoConfigURL = "$($p.AutoConfigURL)" }
+}
+function Set-ConfigProxy($c) {
+    Set-ItemProperty -Path $ChaveProxy -Name ProxyEnable -Value ([int]$c.ProxyEnable) -ErrorAction SilentlyContinue
+    if ("$($c.ProxyServer)") { Set-ItemProperty -Path $ChaveProxy -Name ProxyServer -Value "$($c.ProxyServer)" } else { Remove-ItemProperty -Path $ChaveProxy -Name ProxyServer -ErrorAction SilentlyContinue }
+    if ("$($c.AutoConfigURL)") { Set-ItemProperty -Path $ChaveProxy -Name AutoConfigURL -Value "$($c.AutoConfigURL)" } else { Remove-ItemProperty -Path $ChaveProxy -Name AutoConfigURL -ErrorAction SilentlyContinue }
+}
+function Get-DnsManuais {
+    # Só DNS colocado À MÃO (o que vem automático do roteador muda ao trocar de rede e não conta)
+    $r = @{}
+    foreach ($k in @(Get-ChildItem $ChaveDns -ErrorAction SilentlyContinue)) { $r[$k.PSChildName] = "$((Get-ItemProperty $k.PSPath -ErrorAction SilentlyContinue).NameServer)".Trim() }
+    return $r
+}
+function Set-DnsInterface([string]$Guid, [string]$Servidores) {
+    $ad = Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue | Where-Object { "$($_.InterfaceGuid)" -eq $Guid } | Select-Object -First 1
+    if (-not $ad) { Set-ItemProperty -Path "$ChaveDns\$Guid" -Name NameServer -Value $Servidores; return }
+    if ($Servidores) { Set-DnsClientServerAddress -InterfaceIndex $ad.ifIndex -ServerAddresses @($Servidores -split '[,\s]+' | Where-Object { $_ }) -ErrorAction Stop }
+    else { Set-DnsClientServerAddress -InterfaceIndex $ad.ifIndex -ResetServerAddresses -ErrorAction Stop }
+    Clear-DnsClientCache -ErrorAction SilentlyContinue
+}
+function Get-LinhasHosts([string]$Texto) {
+    @($Texto -split "`r?`n" | ForEach-Object { ($_ -replace '#.*$', '').Trim() } | Where-Object { $_ } | ForEach-Object { $_ -replace '\s+', ' ' })
+}
+function Get-RegrasEntrada {
+    @(Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True -ErrorAction SilentlyContinue | Where-Object { $_.Group -ne $GrupoFirewall } | ForEach-Object Name)
+}
+function Get-EstadoConfig([switch]$ComFirewall) {
+    $hostsTxt = ''; try { $hostsTxt = [IO.File]::ReadAllText($ArqHosts) } catch { }
+    $e = [ordered]@{ proxy = (Get-ConfigProxy); hosts = (Get-LinhasHosts $hostsTxt); rdp = [int](Get-ItemProperty -Path $ChaveRdp -ErrorAction SilentlyContinue).fDenyTSConnections; dns = (Get-DnsManuais) }
+    if ($ComFirewall) { $e.firewall = Get-RegrasEntrada }
+    return $e
+}
+function Update-BaseConfig {
+    # Grava o estado atual como "normal" (depois de você aceitar ou de o WebGuardian desfazer uma mudança)
+    $b = Get-EstadoConfig
+    $velha = $null; if (Test-Path $ArqBaseConfig) { try { $velha = Get-Content $ArqBaseConfig -Raw | ConvertFrom-Json } catch { } }
+    $b.firewall = if ($velha -and $velha.firewall) { @($velha.firewall) } else { Get-RegrasEntrada }
+    ConvertTo-Json -InputObject $b -Depth 5 | Set-Content $ArqBaseConfig -Encoding UTF8
+}
+function Save-CopiaConfig([string]$Nome, [string]$Texto) {
+    New-Item -ItemType Directory -Force -Path $PastaCopiasConfig | Out-Null
+    $f = Join-Path $PastaCopiasConfig ("{0}_{1}.txt" -f (Get-Date -Format 'yyyyMMdd_HHmmss'), $Nome)
+    [IO.File]::WriteAllText($f, $Texto); return $f
+}
+$script:ProxFirewall = [datetime]::MinValue
+function Test-Configuracoes {
+    if (-not (Test-Path $ArqBaseConfig)) { Update-BaseConfig; Write-Log 'INFO' 'Configuracoes de rede guardadas como referencia (proxy, hosts, DNS, acesso remoto, firewall)'; return }
+    $b = Get-Content $ArqBaseConfig -Raw | ConvertFrom-Json
+    $mudou = $false
+    # 1) Proxy: desvia tudo o que você acessa
+    $p = Get-ConfigProxy
+    $pb = [ordered]@{ ProxyEnable = [int]$b.proxy.ProxyEnable; ProxyServer = "$($b.proxy.ProxyServer)"; AutoConfigURL = "$($b.proxy.AutoConfigURL)" }
+    if (($p | ConvertTo-Json -Compress) -ne ($pb | ConvertTo-Json -Compress)) {
+        $abriu = ($p.ProxyEnable -eq 1 -and ($p.ProxyServer -ne $pb.ProxyServer -or $pb.ProxyEnable -ne 1)) -or ($p.AutoConfigURL -and $p.AutoConfigURL -ne $pb.AutoConfigURL)
+        if ($abriu -and -not $SomenteAlertar) {
+            Set-ConfigProxy $pb
+            $txt = if ($p.AutoConfigURL) { "script de proxy $($p.AutoConfigURL)" } else { "proxy $($p.ProxyServer)" }
+            Add-Quarentena 'Proxy' $txt "Alguem configurou um proxy: todo o seu acesso a internet passaria por ele (truque comum para roubar senhas). A mudanca foi desfeita." @{ Novo = $p; Antigo = $pb }
+        } elseif ($abriu) { Test-Alerta 'Proxy' "$($p.ProxyServer) $($p.AutoConfigURL)".Trim() 'Proxy configurado (modo so alertar)' }
+        else { Write-Log 'INFO' 'Proxy desligado ou removido'; $mudou = $true }
+    }
+    # 2) Arquivo hosts: faz um site de banco abrir num endereço falso
+    $hostsTxt = ''; try { $hostsTxt = [IO.File]::ReadAllText($ArqHosts) } catch { }
+    $linhas = Get-LinhasHosts $hostsTxt; $novas = @($linhas | Where-Object { @($b.hosts) -notcontains $_ })
+    if ($novas.Count) {
+        if (-not $SomenteAlertar) {
+            $copiaNova = Save-CopiaConfig 'hosts-novo' $hostsTxt
+            $semNovas = (@($hostsTxt -split "`r?`n" | Where-Object { $l = (($_ -replace '#.*$', '').Trim() -replace '\s+', ' '); -not $l -or @($b.hosts) -contains $l })) -join "`r`n"
+            [IO.File]::WriteAllText($ArqHosts, $semNovas)
+            Add-Quarentena 'Hosts' (($novas | Select-Object -First 3) -join ' | ') "Linhas novas no arquivo hosts do Windows: podem fazer um site (ex.: banco) abrir num endereco falso. Foram retiradas." @{ Novo = $copiaNova }
+        } else { Test-Alerta 'Hosts' (($novas | Select-Object -First 3) -join ' | ') 'Linhas novas no arquivo hosts' }
+    } elseif ((@($linhas) -join '|') -ne (@($b.hosts) -join '|')) { $mudou = $true }
+    # 3) Acesso remoto (RDP) ligado sem você saber
+    $rdp = [int](Get-ItemProperty -Path $ChaveRdp -ErrorAction SilentlyContinue).fDenyTSConnections
+    if ($rdp -eq 0 -and [int]$b.rdp -eq 1) {
+        if (-not $SomenteAlertar) {
+            Set-ItemProperty -Path $ChaveRdp -Name fDenyTSConnections -Value 1 -ErrorAction SilentlyContinue
+            Add-Quarentena 'RDP' 'Area de Trabalho Remota (RDP)' 'Alguem ligou o acesso remoto a este PC. Foi desligado de novo.' @{ }
+        } else { Test-Alerta 'RDP' 'Area de Trabalho Remota' 'Acesso remoto ligado' }
+    } elseif ($rdp -ne [int]$b.rdp) { $mudou = $true }
+    # 4) DNS colocado à mão: troca o "catálogo de endereços" da internet
+    $dns = Get-DnsManuais
+    foreach ($g in @($dns.Keys)) {
+        $antes = "$($b.dns.$g)"; $agora = "$($dns[$g])"
+        $conhecida = @($b.dns.PSObject.Properties.Name) -contains $g   # placa nova (ex.: VPN instalada agora) não conta
+        if ($conhecida -and $agora -and $agora -ne $antes) {
+            if (-not $SomenteAlertar) {
+                try { Set-DnsInterface $g $antes } catch { }
+                Add-Quarentena 'DNS' "DNS $agora" "Alguem trocou o DNS da sua conexao (servidor que traduz nomes de sites). Voltou para o anterior ($(if ($antes) { $antes } else { 'automatico' }))." @{ Interface = $g; Novo = $agora; Antigo = $antes }
+            } else { Test-Alerta 'DNS' $agora 'DNS trocado a mao' }
+        } elseif ($agora -ne $antes) { $mudou = $true }
+    }
+    # 5) Regra de firewall nova liberando entrada (a cada 10 min: a consulta é lenta)
+    if ((Get-Date) -ge $script:ProxFirewall) {
+        $script:ProxFirewall = (Get-Date).AddMinutes(10)
+        $agoraFw = Get-RegrasEntrada
+        foreach ($n in @($agoraFw | Where-Object { @($b.firewall) -notcontains $_ })) {
+            $regra = Get-NetFirewallRule -Name $n -ErrorAction SilentlyContinue; if (-not $regra) { continue }
+            $prog = "$((Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $regra -ErrorAction SilentlyContinue).Program)"
+            if ($prog -and $prog -ne 'Any' -and (Test-Suspeito ([Environment]::ExpandEnvironmentVariables($prog))) -and -not $SomenteAlertar) {
+                Disable-NetFirewallRule -Name $n -ErrorAction SilentlyContinue
+                Add-Quarentena 'Firewall' "$($regra.DisplayName)" "Regra nova no firewall liberando ENTRADA para um programa sem assinatura em pasta suspeita ($prog). Foi desativada." @{ Regra = $n }
+            } else { Write-Log 'INFO' "Regra de firewall nova liberando entrada: $($regra.DisplayName) ($(if ($prog) { $prog } else { 'qualquer programa' }))" }
+        }
+        $b.firewall = @($agoraFw); $mudou = $true
+    }
+    if ($mudou) { $nb = Get-EstadoConfig; $nb.firewall = @($b.firewall); ConvertTo-Json -InputObject $nb -Depth 5 | Set-Content $ArqBaseConfig -Encoding UTF8 }
+}
+
+# ===================== EXTENSÕES DE NAVEGADOR NOVAS =====================
+$ArqBaseExtensoes = Join-Path $Pasta 'extensoes_base.json'
+$script:ProxExtensoes = (Get-Date).AddMinutes(3)
+function Get-NomeExtensao([string]$Dir) {
+    # manifest.json da versão mais nova; nomes "__MSG_x__" vêm de _locales
+    $v = Get-ChildItem -LiteralPath $Dir -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+    if (-not $v) { return '' }
+    try { $m = Get-Content -LiteralPath (Join-Path $v.FullName 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json } catch { return '' }
+    $n = "$($m.name)"
+    if ($n -match '^__MSG_(.+)__$') {
+        $chave = $Matches[1]
+        foreach ($loc in 'pt_BR', 'pt', "$($m.default_locale)", 'en', 'en_US') {
+            $f = Join-Path $v.FullName "_locales\$loc\messages.json"
+            if ($loc -and (Test-Path -LiteralPath $f)) {
+                try { $msgs = Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json
+                      $p = $msgs.PSObject.Properties | Where-Object { $_.Name -ieq $chave } | Select-Object -First 1
+                      if ($p) { return "$($p.Value.message)" } } catch { }
+            }
+        }
+    }
+    return $n
+}
+function Get-Extensoes {
+    $raizes = @(
+        @{ Nav = 'Edge';  Dir = "$env:LOCALAPPDATA\Microsoft\Edge\User Data" }, @{ Nav = 'Chrome'; Dir = "$env:LOCALAPPDATA\Google\Chrome\User Data" },
+        @{ Nav = 'Brave'; Dir = "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data" }, @{ Nav = 'Opera'; Dir = "$env:APPDATA\Opera Software\Opera Stable" },
+        @{ Nav = 'Opera GX'; Dir = "$env:APPDATA\Opera Software\Opera GX Stable" })
+    $lista = @{}
+    foreach ($r in $raizes) {
+        if (-not (Test-Path -LiteralPath $r.Dir)) { continue }
+        $pastas = @(Get-Item -LiteralPath (Join-Path $r.Dir 'Extensions') -ErrorAction SilentlyContinue) +
+                  @(Get-ChildItem -LiteralPath $r.Dir -Directory -ErrorAction SilentlyContinue | ForEach-Object { Get-Item -LiteralPath (Join-Path $_.FullName 'Extensions') -ErrorAction SilentlyContinue })
+        foreach ($pe in @($pastas | Where-Object { $_ })) {
+            foreach ($x in @(Get-ChildItem -LiteralPath $pe.FullName -Directory -ErrorAction SilentlyContinue)) {
+                if ($x.Name -eq 'Temp') { continue }
+                $lista["$($r.Nav)|$($x.Name)"] = @{ Nav = $r.Nav; Id = $x.Name; Dir = $x.FullName }
+            }
+        }
+    }
+    foreach ($p in @(Get-ChildItem "$env:APPDATA\Mozilla\Firefox\Profiles\*\extensions" -Filter '*.xpi' -ErrorAction SilentlyContinue)) {
+        $lista["Firefox|$($p.BaseName)"] = @{ Nav = 'Firefox'; Id = $p.BaseName; Dir = $null }
+    }
+    return $lista
+}
+function Test-Extensoes {
+    if ((Get-Date) -lt $script:ProxExtensoes) { return }
+    $script:ProxExtensoes = (Get-Date).AddMinutes(10)
+    $atual = Get-Extensoes
+    if (-not (Test-Path $ArqBaseExtensoes)) { ConvertTo-Json -InputObject @($atual.Keys) | Set-Content $ArqBaseExtensoes -Encoding UTF8; return }
+    $lido = Get-Content $ArqBaseExtensoes -Raw -Encoding UTF8 | ConvertFrom-Json; $base = @($lido)   # ver nota em Get-Quarentena
+    foreach ($k in @($atual.Keys | Where-Object { $base -notcontains $_ })) {
+        $e = $atual[$k]; $nome = ''; if ($e.Dir) { $nome = Get-NomeExtensao $e.Dir }; if (-not $nome) { $nome = $e.Id }
+        Test-Alerta 'Extensao nova' "$nome ($($e.Nav))" "Uma extensao nova apareceu no $($e.Nav). Se nao foi voce que instalou, remova pelo menu de extensoes do navegador: extensoes podem ler tudo o que voce digita nos sites."
+    }
+    ConvertTo-Json -InputObject @($atual.Keys) | Set-Content $ArqBaseExtensoes -Encoding UTF8
+}
+
+# ===================== PENDRIVE, TECLADO E OUTROS DISPOSITIVOS USB =====================
+$ArqBaseDispositivos = Join-Path $Pasta 'dispositivos_base.json'
+$script:BaseDispositivos = $null
+function Get-DispositivosVigiados {
+    @(Get-CimInstance Win32_PnPEntity -Filter "PNPClass='DiskDrive' OR PNPClass='Keyboard' OR PNPClass='WPD' OR PNPClass='Net'" -ErrorAction SilentlyContinue |
+      Where-Object { $_.PNPClass -ne 'Net' -or "$($_.PNPDeviceID)" -like 'USB*' } |
+      Where-Object { $_.PNPClass -ne 'DiskDrive' -or "$($_.PNPDeviceID)" -match '^(USBSTOR|USB|SCSI\\DISK&VEN_.*USB|SD)' } |
+      ForEach-Object { [pscustomobject]@{ Id = "$($_.PNPDeviceID)"; Nome = "$($_.Name)"; Classe = "$($_.PNPClass)" } })
+}
+function Test-Dispositivos {
+    $atuais = Get-DispositivosVigiados
+    if ($null -eq $script:BaseDispositivos) {
+        $script:BaseDispositivos = @{}
+        if (Test-Path $ArqBaseDispositivos) { $lido = Get-Content $ArqBaseDispositivos -Raw -Encoding UTF8 | ConvertFrom-Json; foreach ($i in @($lido)) { $script:BaseDispositivos["$i"] = $true } }
+        else { foreach ($d in $atuais) { $script:BaseDispositivos[$d.Id] = $true }; ConvertTo-Json -InputObject @($script:BaseDispositivos.Keys) | Set-Content $ArqBaseDispositivos -Encoding UTF8; return }
+    }
+    $novo = $false
+    foreach ($d in $atuais) {
+        if ($script:BaseDispositivos.ContainsKey($d.Id)) { continue }
+        $script:BaseDispositivos[$d.Id] = $true; $novo = $true
+        switch ($d.Classe) {
+            'Keyboard'  { Write-Log 'CRITICO' "[USB] Teclado novo conectado: $($d.Nome)"
+                          Show-Alerta 'WebGuardian: teclado novo' "$($d.Nome)`nSe voce NAO conectou um teclado agora, desconecte o dispositivo: pode ser um pendrive que digita comandos sozinho." }
+            'DiskDrive' { Test-Alerta 'USB' $d.Nome 'Pendrive ou HD externo conectado pela primeira vez. Arquivos dele sao verificados quando copiados para Downloads.' }
+            'WPD'       { Test-Alerta 'USB' $d.Nome 'Celular ou dispositivo portatil conectado pela primeira vez.' }
+            'Net'       { Test-Alerta 'USB' $d.Nome 'Placa de rede USB nova conectada. Se nao foi voce, desconecte.' }
+        }
+    }
+    if ($novo) { ConvertTo-Json -InputObject @($script:BaseDispositivos.Keys) | Set-Content $ArqBaseDispositivos -Encoding UTF8 }
+}
+
+# ===================== AVISO DE VERSÃO NOVA (só avisa, nunca atualiza sozinho) =====================
+# Uma consulta por dia às Releases públicas do GitHub. Não envia nenhum dado seu.
+$script:VersaoNova = $null; $script:JobVersao = $null; $script:ProxVersao = (Get-Date).AddMinutes(10)
+function Step-AvisoVersao {
+    if ($script:JobVersao -and $script:JobVersao.State -ne 'Running') {
+        $r = Receive-Job $script:JobVersao -ErrorAction SilentlyContinue; Remove-Job $script:JobVersao -Force -ErrorAction SilentlyContinue; $script:JobVersao = $null
+        if ($r -and "$($r.tag_name)" -match '^v?(\d+\.\d+\.\d+)$') {
+            $v = $Matches[1]
+            if ([version]$v -gt [version]$VersaoGuardiao) {
+                $antes = $script:VersaoNova
+                $script:VersaoNova = @{ versao = $v; url = "$FonteOficial/releases/latest"; titulo = "$($r.name)" }
+                if (-not $antes -or $antes.versao -ne $v) {
+                    Write-Log 'INFO' "Versao nova do WebGuardian disponivel: $v (instalada: $VersaoGuardiao)"
+                    Show-Alerta 'WebGuardian: versao nova' "A versao $v do WebGuardian esta disponivel no GitHub oficial."
+                }
+            } else { $script:VersaoNova = $null }
+        }
+    }
+    if ((Get-Date) -ge $script:ProxVersao -and -not $script:JobVersao) {
+        $script:ProxVersao = (Get-Date).AddHours(24)
+        $api = ($FonteOficial -replace '^https://github\.com/', 'https://api.github.com/repos/') + '/releases/latest'
+        $script:JobVersao = Start-Job -ScriptBlock { param($u) Invoke-RestMethod -Uri $u -Headers @{ 'User-Agent' = 'WebGuardian' } -TimeoutSec 20 } -ArgumentList $api
+    }
+}
+
+# ===================== RELATÓRIO PARA GUARDAR OU MOSTRAR A UM TÉCNICO =====================
+function Export-Relatorio([string]$Destino = '') {
+    $pasta = $Destino; if (-not $pasta) { $pasta = [Environment]::GetFolderPath('Desktop') }
+    $stamp = Get-Date -Format 'yyyy-MM-dd_HH-mm'
+    $q = @(Get-Quarentena | Sort-Object { [int]$_.Id })
+    $csv = Join-Path $pasta "WebGuardian - decisoes $stamp.csv"
+    $q | ForEach-Object { [pscustomobject]@{ Numero = $_.Id; Tipo = $_.Tipo; Alvo = $_.Alvo; Motivo = $_.Motivo; Quando = $_.Quando; Situacao = $_.Estado } } |
+        Export-Csv -LiteralPath $csv -NoTypeInformation -Delimiter ';' -Encoding UTF8
+    $enc = { param($t) [System.Net.WebUtility]::HtmlEncode("$t") }
+    $sb = New-Object Text.StringBuilder
+    [void]$sb.Append("<!doctype html><html lang=`"pt-BR`"><meta charset=`"utf-8`"><title>Relatorio WebGuardian $stamp</title>")
+    [void]$sb.Append('<style>body{font:14px Segoe UI,sans-serif;margin:32px;color:#111}h1{font-size:22px}h2{font-size:16px;margin-top:28px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:5px 8px;text-align:left;vertical-align:top;font-size:12.5px}th{background:#f2f2f2}.m{font-family:Consolas,monospace}</style>')
+    [void]$sb.Append("<h1>Relatorio do WebGuardian</h1><p>Computador: $(& $enc $env:COMPUTERNAME) &middot; Versao $VersaoGuardiao &middot; Gerado em $(Get-Date -Format 'dd/MM/yyyy HH:mm')<br>Para salvar em PDF: Ctrl+P &rarr; Salvar como PDF.</p>")
+    [void]$sb.Append('<h2>Itens isolados e decisoes</h2><table><tr><th>#</th><th>Tipo</th><th>Alvo</th><th>Motivo</th><th>Quando</th><th>Situacao</th></tr>')
+    foreach ($i in $q) { [void]$sb.Append("<tr><td>$($i.Id)</td><td>$(& $enc $i.Tipo)</td><td class=m>$(& $enc $i.Alvo)</td><td>$(& $enc $i.Motivo)</td><td>$(& $enc $i.Quando)</td><td>$(& $enc $i.Estado)</td></tr>") }
+    [void]$sb.Append('</table><h2>Downloads verificados</h2><table><tr><th>Quando</th><th>Arquivo</th><th>Resultado</th><th>Detalhe</th></tr>')
+    foreach ($d in @($script:DownloadsRecentes)) { [void]$sb.Append("<tr><td>$(& $enc $d.quando)</td><td class=m>$(& $enc $d.nome)</td><td>$(& $enc $d.resultado)</td><td>$(& $enc $d.detalhe)</td></tr>") }
+    [void]$sb.Append('</table><h2>Atividade desta sessao (mais recente primeiro)</h2><table><tr><th>Quando</th><th>Nivel</th><th>Registro</th></tr>')
+    if (Test-Path $ArqLog) { foreach ($l in @(Get-Content $ArqLog -Tail 500 -Encoding UTF8)[-1..-500]) { if ($l -match '^(\S+ \S+) \[(\w+)\] (.*)$') { [void]$sb.Append("<tr><td>$($Matches[1])</td><td>$($Matches[2])</td><td>$(& $enc $Matches[3])</td></tr>") } } }
+    [void]$sb.Append('</table></html>')
+    $html = Join-Path $pasta "WebGuardian - relatorio $stamp.html"
+    [IO.File]::WriteAllText($html, $sb.ToString(), (New-Object Text.UTF8Encoding $true))
+    Write-Log 'INFO' "Relatorio exportado para a Area de Trabalho: $html"
+    return "Relatorio salvo na Area de Trabalho: 'WebGuardian - relatorio $stamp.html' (abre no navegador; Ctrl+P salva em PDF) e a planilha 'WebGuardian - decisoes $stamp.csv'."
+}
+
+# ===================== ATUALIZAÇÃO PEDIDA PELO "ATUALIZAR WEBGUARDIAN.bat" =====================
+# O .bat só deixa um pedido; quem confere a assinatura é o WebGuardian JÁ INSTALADO (pasta protegida), com a
+# chave oficial dele. Uma cópia adulterada da pasta baixada não consegue pular a conferência.
+$ArqPedidoAtualizar = Join-Path (Join-Path $env:LOCALAPPDATA 'Guardiao') 'atualizar-pedido'
+$NucleoOficial = @('WebGuardian.ps1', 'painel.html', 'INSTALAR WEBGUARDIAN.bat', 'ATUALIZAR WEBGUARDIAN.bat', 'DESINSTALAR WEBGUARDIAN.bat',
+                   'VERIFICAR AUTENTICIDADE.bat', 'app\WebGuardianApp.cs', 'app\compilar.ps1', 'app\app.manifest', 'app\webguardian.ico',
+                   'ferramentas\assinar-versao.ps1', 'ASSINATURA\manifesto.json', 'ASSINATURA\manifesto.sig')
+function Step-PedidoAtualizacao {
+    if (-not (Test-Path $ArqPedidoAtualizar)) { return }
+    $origem = ''; try { $origem = ([IO.File]::ReadAllText($ArqPedidoAtualizar, [Text.Encoding]::UTF8)).Trim().Trim('"').TrimEnd('\') } catch { }
+    Remove-Item $ArqPedidoAtualizar -Force -ErrorAction SilentlyContinue
+    if (-not $origem -or -not (Test-Path -LiteralPath (Join-Path $origem 'WebGuardian.ps1'))) { Write-Log 'ALERTA' "Pedido de atualizacao com pasta invalida: $origem"; return }
+    $v = Test-Autenticidade (Join-Path $origem 'ASSINATURA') $origem
+    if ($v.estado -ne 'oficial') {
+        Write-Log 'ALERTA' "Atualizacao RECUSADA: a pasta $origem nao e a versao oficial ($($v.estado): $(@($v.problemas) -join '; '))"
+        Show-Alerta 'WebGuardian: atualizacao recusada' "A pasta pedida nao e a versao oficial assinada. Nada foi instalado.`n$origem"
+        return
+    }
+    if (-not (Confirm-NoWindows 'Atualizar o WebGuardian?' "Versao instalada: $VersaoGuardiao  ->  nova: $($v.versao)`nAssinatura oficial conferida pelo WebGuardian instalado ($($v.impressao)).`nOrigem: $origem")) {
+        Write-Log 'INFO' "Atualizacao para $($v.versao) cancelada na confirmacao"; return
+    }
+    # Copia para a pasta protegida, confere DE NOVO lá (ninguém troca no meio do caminho) e só então roda
+    $dest = Join-Path $Pasta 'atualizacao'
+    Remove-Item -LiteralPath $dest -Recurse -Force -ErrorAction SilentlyContinue
+    foreach ($n in $NucleoOficial) { $d = Join-Path $dest $n; New-Item -ItemType Directory -Force -Path (Split-Path $d) | Out-Null; Copy-Item -LiteralPath (Join-Path $origem $n) -Destination $d -Force -ErrorAction SilentlyContinue }
+    $v2 = Test-Autenticidade (Join-Path $dest 'ASSINATURA') $dest
+    if ($v2.estado -ne 'oficial' -or $v2.versao -ne $v.versao) { Write-Log 'ALERTA' "Atualizacao interrompida: a copia mudou durante a transferencia ($($v2.estado))"; return }
+    Write-Log 'INFO' "Atualizacao para $($v.versao) aprovada: iniciando a partir da copia conferida em $dest"
+    Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $dest 'WebGuardian.ps1')`"", '-Atualizar')
+}
+
 # ================================ PAINEL HTML ================================
 function Format-Data($d) { if ($d) { try { return ([datetime]$d).ToString('dd/MM/yyyy HH:mm') } catch { } }; return '' }
 
@@ -1698,6 +2086,8 @@ function Get-EstadoPainel {
         sessao      = Get-InfoSessao
         versao      = $VersaoGuardiao
         varreduraAuto = $(if (Test-Path $ArqVarreduraAuto) { (Get-Content $ArqVarreduraAuto -Raw).Trim() } else { '' })
+        novaVersao  = $script:VersaoNova
+        confiaveis  = @(Get-Confiaveis | ForEach-Object { @{ caminho = "$($_.caminho)"; desde = "$($_.desde)"; motivo = "$($_.motivo)" } })
         autenticidade = $(if (-not $script:Autenticidade) { try { Update-Autenticidade } catch { } }
                           $a = $script:Autenticidade
                           if ($a) { @{ estado = $a.estado; versao = $a.versao; impressao = $a.impressao; fonte = $a.fonte; problemas = @($a.problemas | Select-Object -First 5) } })
@@ -1854,7 +2244,9 @@ function Invoke-PedidoPainel($ctx) {
                 $script:CodigosApp.Remove($cod)
                 $ctx.Response.StatusCode = 302
                 $ctx.Response.Headers.Add('Set-Cookie', "gsess=$($script:Token); Path=/; HttpOnly; SameSite=Strict")
-                $ctx.Response.Headers.Add('Location', '/')
+                # Com algo esperando decisão, o app já abre na aba Decisões
+                $destinoApp = '/'; if (@(Get-Quarentena | Where-Object Estado -eq 'ISOLADO').Count) { $destinoApp = '/#decisoes' }
+                $ctx.Response.Headers.Add('Location', $destinoApp)
                 $ctx.Response.Headers.Add('Cache-Control', 'no-store')
                 $ctx.Response.Close(); return
             }
@@ -1876,10 +2268,20 @@ function Invoke-PedidoPainel($ctx) {
             Send-Resposta $ctx 200 'application/json; charset=utf-8' (ConvertTo-Json -InputObject (Get-EstadoPainel) -Depth 6 -Compress); return
         }
         if ($caminho -eq '/api/acao' -and $req.HttpMethod -eq 'POST') {
+            # Pedido de ação é sempre pequeno: recusa corpo grande (evita travar o monitor)
+            if ($req.ContentLength64 -lt 0 -or $req.ContentLength64 -gt 4096) { Send-Resposta $ctx 413 'text/plain' 'Pedido grande demais'; return }
             $leitor = New-Object IO.StreamReader($req.InputStream, [Text.Encoding]::UTF8)
             $corpo = $leitor.ReadToEnd() | ConvertFrom-Json
-            $id = "$($corpo.id)"
-            $msg = switch ("$($corpo.acao)") {
+            $id = "$($corpo.id)"; $acaoPedida = "$($corpo.acao)"
+            # Ações sensíveis só acontecem depois da confirmação na janela do Windows aberta pelo monitor
+            $textoConf = Get-TextoConfirmacao $acaoPedida $id
+            if ($textoConf -and -not (Confirm-NoWindows 'Confirme no WebGuardian' $textoConf)) {
+                Write-Log 'ALERTA' "Acao '$acaoPedida' ($id) pedida pelo painel NAO confirmada na janela do Windows"
+                Send-Resposta $ctx 200 'application/json; charset=utf-8' (ConvertTo-Json -InputObject @{ mensagem = 'Cancelado: a acao nao foi confirmada na janela do Windows.' } -Compress); return
+            }
+            $msg = switch ($acaoPedida) {
+                'exportar'        { Export-Relatorio }
+                'removerConfiavel' { $n = 0; if ([int]::TryParse($id, [ref]$n)) { Remove-Confiavel $n } else { 'Item invalido.' } }
                 'liberar'         { Invoke-AcaoItem 'liberar' $id }
                 'apagar'          { Invoke-AcaoItem 'apagar' $id }
                 'isolarRede'      { Invoke-IsolarRede }
@@ -2390,7 +2792,11 @@ switch ($PSCmdlet.ParameterSetName) {
                     try { Test-Persistencia } catch { Write-Log 'INFO' "Erro persistencia: $_" }
                     Step-Painel
                     try { Test-Defender     } catch { }
+                    try { Test-Configuracoes } catch { Write-Log 'INFO' "Erro configuracoes: $_" }   # proxy, hosts, DNS, RDP, firewall
+                    try { Test-Extensoes    } catch { Write-Log 'INFO' "Erro extensoes: $_" }
                 }
+                try { Test-Dispositivos } catch { }          # pendrive, teclado, celular, rede USB
+                try { Step-AvisoVersao  } catch { }          # 1x por dia: versão nova no GitHub oficial?
                 try { Get-EstadoVarredura | Out-Null } catch { }   # registra o fim da verificação mesmo com o painel fechado
                 try { Step-AtualizacaoDefender } catch { Write-Log 'INFO' "Erro na atualizacao do Defender: $_" }   # base sempre em dia
                 if ((Get-Date) -ge $script:ProxAutenticidade) { try { Update-Autenticidade } catch { } }   # arquivos instalados intactos?
@@ -2403,6 +2809,7 @@ switch ($PSCmdlet.ParameterSetName) {
                     [System.Windows.Forms.Application]::DoEvents()
                     Step-Painel
                     Test-GatilhoPainel
+                    try { Step-PedidoAtualizacao } catch { Write-Log 'INFO' "Erro no pedido de atualizacao: $_" }
                     if ((Get-Date) -ge $proxDl) { try { Step-Downloads } catch { Write-Log 'INFO' "Erro downloads: $_" }; $proxDl = (Get-Date).AddSeconds(1) }
                     Start-Sleep -Milliseconds 100
                 }

@@ -4,16 +4,30 @@ Cada versão é publicada em [Releases](https://github.com/LuizZanchetta/WebGuar
 
 ## 2.0.0 — 2026-11-24
 
-**Visual novo do painel**
+**Visual novo, mais segurança e novas vigilâncias**
 
-Atualização só de aparência: a proteção, as verificações e as decisões funcionam exatamente como na 1.9.1. Com ela fechamos este ciclo; as próximas atualizações virão com o tempo.
+A versão 2 traz o painel redesenhado e fecha este ciclo com uma revisão de segurança completa. As próximas atualizações virão com o tempo.
 
+### Segurança (correções da revisão)
+- **Confirmação pelo Windows nas ações sensíveis.** Liberar itens isolados, reconectar a internet e baixar proteções do Defender agora pedem confirmação numa janela do Windows aberta pelo próprio WebGuardian, que roda como Administrador. Antes, um programa comum no seu usuário conseguia a chave do painel e poderia, por exemplo, liberar a si mesmo. O Windows não deixa um programa comum clicar numa janela de Administrador. Sem resposta em 1 minuto, a janela cancela; Enter e Esc também cancelam.
+- **Atualização conferida pela cópia instalada.** O `ATUALIZAR WEBGUARDIAN.bat` agora só deixa um pedido: quem confere a assinatura da versão nova é o WebGuardian já instalado, numa pasta protegida, com a chave oficial dele. A cópia é conferida de novo depois de copiada, e você confirma numa janela do Windows. Uma cópia adulterada é recusada sem nem perguntar.
+- Pedidos grandes demais ao painel são recusados, e apagar uma ameaça não trava mais o monitor.
+
+### Vigilância nova
+- **Truques de golpe na configuração:** proxy configurado, linhas novas no arquivo **hosts**, **DNS** trocado à mão e **acesso remoto (RDP)** ligado. A mudança é desfeita na hora e vira decisão: **Liberar** aceita, **Apagar** mantém desfeita. Placas de rede novas (como a de uma VPN) não geram alarme.
+- **Firewall:** regra nova liberando entrada para um programa suspeito é desativada.
+- **Extensões novas** no Edge, Chrome, Brave, Opera, Opera GX e Firefox: alerta com o nome da extensão.
+- **Pendrive, celular, placa de rede USB e teclado novos:** alerta. Teclado novo é **alerta crítico**, porque pode ser um pendrive que digita comandos sozinho.
+
+### Mais praticidade
+- **Aviso de versão nova:** uma consulta por dia às Releases do GitHub oficial. O WebGuardian só avisa (no painel e na tela); quem decide atualizar é você.
+- **Programas confiáveis:** o que você libera entra numa lista, na aba Histórico, e não é isolado de novo. Vale só para o mesmo arquivo (conferido pela "digital" SHA-256): se ele for trocado, volta a ser vigiado. Dá para tirar da lista.
+- **Exportar relatório:** gera na Área de Trabalho um relatório (abre no navegador; Ctrl+P salva em PDF) e uma planilha com as decisões, para guardar ou mostrar a um técnico.
+- **Avisos que levam direto às Decisões:** clicar no aviso abre o app já na aba Decisões quando há algo esperando você.
+
+### Visual
 - **Painel redesenhado**, com cara de console: barra superior com o caminho da aba, o estado "Ao vivo", o atalho para as decisões e o botão **Desconectar da internet** sempre à mão.
-- **Resumo** com o estado geral em destaque e o botão principal para a ação mais importante do momento.
-- A aba do antivírus agora se chama **Antivírus**, já que pode ser o Defender ou outro (Avast, AVG...).
-- Botão de **ajuda** com todos os atalhos de teclado.
-- Rodapé com o estado do monitor, o selo **Versão oficial** e a versão.
-- Funciona no modo claro e no escuro, e se adapta a telas pequenas.
+- Aba do antivírus agora se chama **Antivírus** (pode ser o Defender ou outro, como o Avast); botão de **ajuda** com os atalhos; modo claro e escuro; adapta-se a telas pequenas.
 - Continua um arquivo único que roda só no seu PC: nada é carregado da internet.
 
 ## 1.9.1 — 2026-11-23
