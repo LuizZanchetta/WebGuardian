@@ -2,6 +2,21 @@
 
 Cada versão é publicada em [Releases](https://github.com/LuizZanchetta/WebGuardian/releases) com a etiqueta `vX.Y.Z`. Toda versão oficial é assinada digitalmente: a impressão digital precisa ser **`WG-D0C5-ACA9-5777-6D53-ED11`**.
 
+## 1.9.1 — 2026-11-23
+
+**Detecção de conexões mais completa e sem alarmes falsos com a rede de casa**
+
+Uma revisão da detecção de conexões (programa sem assinatura, em pasta suspeita, falando com a internet) achou brechas e alarmes falsos possíveis. Todos foram corrigidos.
+
+- **Porta dos fundos:** programa sem assinatura em pasta suspeita que deixa uma porta **aberta esperando conexões de fora** agora é congelado e bloqueado, mesmo antes de alguém se conectar.
+- **Tentativas de conexão:** programa suspeito **tentando** falar com a internet (por exemplo, com um servidor do invasor fora do ar) agora é pego, não só depois que a conexão abre.
+- **Número de processo reaproveitado:** o Windows reutiliza esses números; antes, um programa novo que recebesse o número de um já isolado passava sem conferência. Agora cada programa é identificado pelo caminho e pela hora em que começou.
+- **Programa trocado no mesmo lugar:** se um programa assinado for substituído por outro sem assinatura no mesmo caminho, a assinatura é conferida de novo.
+- **Sem alarme falso com a rede de casa:** endereços da rede local escritos no formato `::ffff:192.168…` deixaram de ser tratados como internet (TV, impressora, celular na mesma rede).
+- **Sem alarme falso com VPN/operadora:** a faixa `100.64.0.0/10` (ex.: Tailscale, rede da operadora) não é mais tratada como internet.
+- Com outro antivírus no lugar do Defender (Avast etc.), o programa congelado agora é conferido **por esse antivírus**.
+- Conferido nas conexões reais de um PC: 125 conexões e portas avaliadas, nenhum alarme falso.
+
 ## 1.9.0 — 2026-11-23
 
 **Ameaças do antivírus na aba Decisões: você decide pelo WebGuardian**

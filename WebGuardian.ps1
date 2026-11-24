@@ -60,7 +60,9 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
-$VersaoGuardiao = '1.9.0'   # 1.9.0: ameaças detectadas pelo Defender na aba Decisões (liberar ou apagar)
+$VersaoGuardiao = '1.9.1'   # 1.9.1: detecção de conexões: portas dos fundos, tentativas de conexão, número de processo
+                            #        reaproveitado, programa trocado; sem alarme falso com rede de casa/VPN
+                            # 1.9.0: ameaças detectadas pelo Defender na aba Decisões (liberar ou apagar)
                             # 1.8.2: verificação pelo antivírus ativo (AMSI): downloads e verificações rápida/completa
                             #        com Avast/AVG/Kaspersky... sem abrir a tela deles; verificação rápida automática diária
                             # 1.8.1: compatível com outros antivírus (Avast, AVG, Norton...): sem alarme falso de
@@ -304,14 +306,23 @@ function Test-Alerta([string]$Tipo, [string]$Alvo, [string]$Motivo) {
 
 function Test-IpPrivado([string]$Ip) {
     if ($Config.IPsConfiaveis -contains $Ip) { return $true }
-    return ($Ip -match '^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|169\.254\.|::1$|fe80:|f[cd][0-9a-f]{2}:|0\.0\.0\.0$|::$)')
+    $Ip = $Ip -replace '^::ffff:', ''   # endereço IPv4 escrito dentro de IPv6 (ex.: ::ffff:192.168.0.20)
+    # 100.64.0.0/10: rede compartilhada de operadora/VPN (ex.: Tailscale), não é endereço da internet
+    return ($Ip -match '^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|169\.254\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|::1$|fe80:|f[cd][0-9a-f]{2}:|0\.0\.0\.0$|::$)')
 }
 
 $script:CacheAssinatura = @{}
+function Get-ChaveArquivo([string]$Caminho) {
+    # caminho + data + tamanho: identifica ESTE arquivo (outro arquivo no mesmo lugar = outra chave)
+    try { $fi = [IO.FileInfo]$Caminho; if ($fi.Exists) { return "$Caminho|$($fi.LastWriteTimeUtc.Ticks)|$($fi.Length)" } } catch { }
+    return $Caminho
+}
 function Test-Suspeito([string]$Caminho) {
     # Suspeito = arquivo em pasta suspeita E sem assinatura digital válida
     if ([string]::IsNullOrWhiteSpace($Caminho)) { return $false }
-    if ($script:CacheAssinatura.ContainsKey($Caminho)) { return $script:CacheAssinatura[$Caminho] }
+    # A lembrança vale para ESTE arquivo: se for trocado no mesmo caminho (data/tamanho mudam), confere de novo
+    $chave = Get-ChaveArquivo $Caminho
+    if ($script:CacheAssinatura.ContainsKey($chave)) { return $script:CacheAssinatura[$chave] }
     $emPasta = $false
     foreach ($p in $Config.PastasSuspeitas) { if ($Caminho -like "*$p*") { $emPasta = $true; break } }
     $assinado = $false
@@ -319,7 +330,7 @@ function Test-Suspeito([string]$Caminho) {
         try { $assinado = ((Get-AuthenticodeSignature -LiteralPath $Caminho).Status -eq 'Valid') } catch { }
     }
     $res = ($emPasta -and -not $assinado)
-    $script:CacheAssinatura[$Caminho] = $res
+    $script:CacheAssinatura[$chave] = $res
     return $res
 }
 
@@ -334,6 +345,14 @@ function Get-ExeDeComando([string]$Linha) {
 $script:JobScan = $null
 function Start-ScanDefender([string]$Caminho) {
     try {
+        # Outro antivírus no lugar do Defender (Avast etc.): pede a ELE que confira o arquivo (AMSI)
+        $outro = $null; try { $outro = Get-AntivirusSubstituto } catch { }
+        if ($outro -and $Caminho -and (Test-Path -LiteralPath $Caminho) -and (Test-AmsiOutroAntivirus)) {
+            $r = [Guardiao.Varredor]::Verificar($Caminho, 64)
+            if ($r -eq 'ameaca' -or $r -eq 'bloqueado') { Write-Log 'CRITICO' "O $outro confirmou AMEACA em $Caminho" }
+            else { Write-Log 'INFO' "$outro verificou ${Caminho}: $r" }
+            return
+        }
         if ($Caminho -and (Test-Path -LiteralPath $Caminho)) {
             Write-Log 'INFO' "Defender: verificando $Caminho"
             Start-Job -ScriptBlock { param($c) Start-MpScan -ScanType CustomScan -ScanPath $c } -ArgumentList $Caminho | Out-Null
@@ -1562,15 +1581,26 @@ function Test-Persistencia {
 
 $script:PidsIsolados = @{}
 function Test-Conexoes {
-    $conns = Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue | Where-Object { -not (Test-IpPrivado $_.RemoteAddress) }
+    # Olha: conexões abertas e TENTATIVAS de conexão com a internet, e portas abertas esperando quem vem de fora
+    # (porta dos fundos). Rede de casa / do próprio PC não conta.
+    $conns = @(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object {
+        (($_.State -eq 'Established' -or $_.State -eq 'SynSent') -and -not (Test-IpPrivado $_.RemoteAddress)) -or
+        ($_.State -eq 'Listen' -and @('0.0.0.0', '::') -contains "$($_.LocalAddress)") })
     foreach ($c in $conns) {
         $procId = [int]$c.OwningProcess
-        if ($procId -le 4 -or $script:PidsIsolados.ContainsKey($procId)) { continue }
+        if ($procId -le 4) { continue }
         $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
         if (-not $proc -or -not $proc.Path) { continue }
+        # O Windows reaproveita números de processo: a chave inclui o programa e a hora em que ele começou
+        $inicio = ''; try { $inicio = $proc.StartTime.Ticks } catch { }
+        $chave = "$procId|$($proc.Path)|$inicio"
+        if ($script:PidsIsolados.ContainsKey($chave)) { continue }
         if (Test-Suspeito $proc.Path) {
-            $script:PidsIsolados[$procId] = $true
-            Lock-Processo $procId $proc.Path "Programa sem assinatura em pasta suspeita conectado a $($c.RemoteAddress):$($c.RemotePort)"
+            $script:PidsIsolados[$chave] = $true
+            $oque = "conectado a $($c.RemoteAddress):$($c.RemotePort)"
+            if ($c.State -eq 'SynSent') { $oque = "tentando conectar a $($c.RemoteAddress):$($c.RemotePort)" }
+            if ($c.State -eq 'Listen') { $oque = "com a porta $($c.LocalPort) aberta esperando conexões de fora (possível porta dos fundos)" }
+            Lock-Processo $procId $proc.Path "Programa sem assinatura em pasta suspeita $oque"
         }
     }
 }

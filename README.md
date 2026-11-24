@@ -8,9 +8,9 @@ com o Windows Defender.
 > **Tudo roda só no seu computador.** Não há servidor, conta, nem envio de dados seus para a
 > internet. Cada pessoa que instala tem o seu WebGuardian independente.
 
-**Versão atual: 1.9.0**
+**Versão atual: 1.9.1**
 
-### ⬇️ [Baixar o WebGuardian 1.9.0 (versão mais recente)](https://github.com/LuizZanchetta/WebGuardian/archive/refs/tags/v1.9.0.zip)
+### ⬇️ [Baixar o WebGuardian 1.9.1 (versão mais recente)](https://github.com/LuizZanchetta/WebGuardian/archive/refs/tags/v1.9.1.zip)
 
 O que mudou nesta versão e nas anteriores: **[Releases](https://github.com/LuizZanchetta/WebGuardian/releases/latest)**.
 Depois de baixar, siga a [Instalação](#instalação).
@@ -37,7 +37,7 @@ Depois de baixar, siga a [Instalação](#instalação).
 | Login remoto bem-sucedido vindo de um IP de fora da sua rede | Bloqueia o IP no Firewall |
 | Usuário novo criado no Windows | Desativa o usuário |
 | Alguém adicionado ao grupo Administradores | Remove do grupo |
-| Programa sem assinatura, rodando de Temp/Downloads/AppData, conectado à internet | **Congela** o programa e bloqueia a internet dele |
+| Programa sem assinatura, rodando de Temp/Downloads/AppData, conectado ou tentando conectar à internet, ou com uma porta aberta esperando conexões de fora | **Congela** o programa e bloqueia a internet dele |
 | Tarefa agendada, serviço ou programa de inicialização novo e suspeito | Desativa / remove (guarda backup para desfazer) |
 | **Qualquer arquivo baixado** (inclusive instaladores) | Passa pelas regras contra golpes e pelo Windows Defender assim que termina de baixar |
 | Windows Defender desligado, ameaça detectada, log de segurança apagado | Alerta |
@@ -337,6 +337,8 @@ powershell -ExecutionPolicy Bypass -File app\compilar.ps1
 
 Notas completas de cada versão: [CHANGELOG](CHANGELOG.md) e [Releases](https://github.com/LuizZanchetta/WebGuardian/releases).
 
+- **1.9.1** — detecção de conexões: portas dos fundos, tentativas de conexão, número de processo
+  reaproveitado e programa trocado; sem alarme falso com rede de casa e VPN.
 - **1.9.0** — ameaças detectadas pelo Defender aparecem na aba **Decisões**: liberar (alarme
   falso: permite e devolve o arquivo) ou apagar, sem abrir a Segurança do Windows.
 - **1.8.2** — verificação pelo antivírus ativo (Avast, AVG, Kaspersky…) sem abrir a tela dele:
