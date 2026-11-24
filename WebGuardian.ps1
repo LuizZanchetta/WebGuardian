@@ -60,7 +60,8 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
-$VersaoGuardiao = '1.9.1'   # 1.9.1: detecção de conexões: portas dos fundos, tentativas de conexão, número de processo
+$VersaoGuardiao = '2.0.0'   # 2.0.0: painel com visual novo (atualização só estética)
+                            # 1.9.1: detecção de conexões: portas dos fundos, tentativas de conexão, número de processo
                             #        reaproveitado, programa trocado; sem alarme falso com rede de casa/VPN
                             # 1.9.0: ameaças detectadas pelo Defender na aba Decisões (liberar ou apagar)
                             # 1.8.2: verificação pelo antivírus ativo (AMSI): downloads e verificações rápida/completa

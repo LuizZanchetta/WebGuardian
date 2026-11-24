@@ -8,9 +8,9 @@ com o Windows Defender.
 > **Tudo roda só no seu computador.** Não há servidor, conta, nem envio de dados seus para a
 > internet. Cada pessoa que instala tem o seu WebGuardian independente.
 
-**Versão atual: 1.9.1**
+**Versão atual: 2.0.0**
 
-### ⬇️ [Baixar o WebGuardian 1.9.1 (versão mais recente)](https://github.com/LuizZanchetta/WebGuardian/archive/refs/tags/v1.9.1.zip)
+### ⬇️ [Baixar o WebGuardian 2.0.0 (versão mais recente)](https://github.com/LuizZanchetta/WebGuardian/archive/refs/tags/v2.0.0.zip)
 
 O que mudou nesta versão e nas anteriores: **[Releases](https://github.com/LuizZanchetta/WebGuardian/releases/latest)**.
 Depois de baixar, siga a [Instalação](#instalação).
@@ -168,7 +168,7 @@ Abra pelo atalho **WebGuardian** ou dê dois cliques no **escudo perto do relóg
 | **Decisões** | Itens isolados pelo WebGuardian **e ameaças detectadas pelo Defender** esperando você: **Liberar** (era seguro) ou **Apagar ameaça** |
 | **Atividade** | Tudo o que o WebGuardian registrou **desde que o PC foi ligado** |
 | **Conexões** | Programas conectados à internet agora (suspeitos em destaque) |
-| **Defender** | Estado do Defender, base de ameaças, proteções extras, verificações, ameaças e downloads verificados |
+| **Antivírus** | Antivírus ativo (Defender ou outro, como o Avast), base de ameaças, proteções extras, verificações, ameaças e downloads verificados |
 | **Histórico** | Decisões já tomadas |
 
 ### Atividade por sessão: quem acessou a máquina
@@ -337,6 +337,7 @@ powershell -ExecutionPolicy Bypass -File app\compilar.ps1
 
 Notas completas de cada versão: [CHANGELOG](CHANGELOG.md) e [Releases](https://github.com/LuizZanchetta/WebGuardian/releases).
 
+- **2.0.0** — visual novo do painel (só estética; o funcionamento é o mesmo da 1.9.1).
 - **1.9.1** — detecção de conexões: portas dos fundos, tentativas de conexão, número de processo
   reaproveitado e programa trocado; sem alarme falso com rede de casa e VPN.
 - **1.9.0** — ameaças detectadas pelo Defender aparecem na aba **Decisões**: liberar (alarme

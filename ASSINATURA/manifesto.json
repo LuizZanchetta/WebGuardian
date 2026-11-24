@@ -1,12 +1,12 @@
 {
   "produto": "WebGuardian",
-  "versao": "1.9.1",
+  "versao": "2.0.0",
   "fonteOficial": "https://github.com/LuizZanchetta/WebGuardian",
   "impressaoDigital": "WG-D0C5-ACA9-5777-6D53-ED11",
-  "assinadoEm": "2026-11-23 21:17",
+  "assinadoEm": "2026-11-24 00:02",
   "arquivos": {
-    "WebGuardian.ps1": "1973769a255f0f9f362bc6fda09430b9ff7bb0ec7b8221c919552e02dfbd243d",
-    "painel.html": "a6528e11e50d0989b06fe3a1e750029fec51467ede46431e97447a0582b68335",
+    "WebGuardian.ps1": "8cfc233af28c5defd5a27ab5c1f07704361a63b118872260eb34f976acdbd12a",
+    "painel.html": "524a9cead3969cb978ed95f17a1e8fa08373351eb05e189ef583d1b1332d5859",
     "INSTALAR WEBGUARDIAN.bat": "6d644298022d636c8b41bfa84a90cd737d264a7ea210a1ba5a086985a121e7d1",
     "ATUALIZAR WEBGUARDIAN.bat": "c6d51d604ac67c941dd9269cebacb1414df67ca12fa0e63fa37b98e5e7588f6b",
     "DESINSTALAR WEBGUARDIAN.bat": "1f7e167d818ba61dae20adb3397f106ec0c6e0d556aaa5ec85534d475e99d550",

@@ -2,6 +2,20 @@
 
 Cada versão é publicada em [Releases](https://github.com/LuizZanchetta/WebGuardian/releases) com a etiqueta `vX.Y.Z`. Toda versão oficial é assinada digitalmente: a impressão digital precisa ser **`WG-D0C5-ACA9-5777-6D53-ED11`**.
 
+## 2.0.0 — 2026-11-24
+
+**Visual novo do painel**
+
+Atualização só de aparência: a proteção, as verificações e as decisões funcionam exatamente como na 1.9.1. Com ela fechamos este ciclo; as próximas atualizações virão com o tempo.
+
+- **Painel redesenhado**, com cara de console: barra superior com o caminho da aba, o estado "Ao vivo", o atalho para as decisões e o botão **Desconectar da internet** sempre à mão.
+- **Resumo** com o estado geral em destaque e o botão principal para a ação mais importante do momento.
+- A aba do antivírus agora se chama **Antivírus**, já que pode ser o Defender ou outro (Avast, AVG...).
+- Botão de **ajuda** com todos os atalhos de teclado.
+- Rodapé com o estado do monitor, o selo **Versão oficial** e a versão.
+- Funciona no modo claro e no escuro, e se adapta a telas pequenas.
+- Continua um arquivo único que roda só no seu PC: nada é carregado da internet.
+
 ## 1.9.1 — 2026-11-23
 
 **Detecção de conexões mais completa e sem alarmes falsos com a rede de casa**
