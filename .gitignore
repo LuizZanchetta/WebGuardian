@@ -20,3 +20,10 @@ placas_desligadas.json
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Obsidian (configuração local do vault — não publicar)
+.obsidian/
+.trash/
+
+# Notas de trabalho no Obsidian (caminhos locais, pendências) - só neste PC
+notas/

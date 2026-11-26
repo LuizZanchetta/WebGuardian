@@ -2,6 +2,25 @@
 
 Cada versão é publicada em [Releases](https://github.com/LuizZanchetta/WebGuardian/releases) com a etiqueta `vX.Y.Z`. Toda versão oficial é assinada digitalmente: a impressão digital precisa ser **`WG-D0C5-ACA9-5777-6D53-ED11`**.
 
+## 2.1.0 — 2026-11-26
+
+**Agente no painel, que conversa e entende o contexto, e correção dos alarmes falsos da 2.0**
+
+A 2.1 traz um agente que acompanha o WebGuardian: explica cada alerta, recomenda o que fazer com cada item isolado e conversa com você. **Ele funciona só no seu PC, por regras, sem internet:** não usa modelo de IA na nuvem, não tem chave de API e não envia nada, nem metadados.
+
+### Agente no painel (aba nova "Agente IA", tecla `7`)
+- **Análise de cada item isolado:** dentro de cada item em Decisões aparece o veredito (provável ameaça, suspeito ou provável alarme falso), a confiança, o que o agente viu e a recomendação (apagar, liberar ou manter isolado). O botão **Perguntar ao agente** abre a conversa sobre aquele item.
+- **Conversa que entende o contexto.** Pergunte do seu jeito, com erro de digitação ou abreviação ("qem entrou no pc hj?"), ou várias coisas numa mensagem só ("está tudo bem? e o antivírus?"). O agente acompanha a conversa: entende "e ontem?", "e às 14h?", "por quê?", "mais detalhes", "fui eu", "não fui eu", "posso liberar ele?" e responde "sim" quando ele oferece algo. Sabe falar de um programa pelo nome ("o anydesk está aberto?"), de um IP ou de um item pelo número ("#3"), e confere com você o que fazer se você achar que foi invadido. Depois de cada resposta aparecem sugestões para continuar.
+- **Resumo do dia** às 12h (ou quando você pedir), com o que merece atenção.
+- **Regras de emergência**, cada uma pode ser desligada: desconectar da internet em logon remoto bem-sucedido vindo de fora; congelar programa sem assinatura enviando dados com confiança acima de 90%; bloquear IP com tentativas de senha em massa quando o WebGuardian está só alertando.
+- **Autonomia:** "Só sugere", "Age em emergência" (padrão) ou "Automático", que também mantém isolado sozinho o que tem confiança muito alta. **Liberar e apagar continuam sempre com você.** Tudo o que o agente faz sozinho aparece em Ações automáticas e pode ser desfeito.
+- Pausar o agente, desligar uma regra, voltar para "Só sugere" e desfazer uma ação dele pedem a confirmação do Windows, como as outras ações sensíveis.
+
+### Correções
+- **Janela preta ao ligar o PC:** o monitor agora inicia pelo console do Windows sem janela (`conhost --headless`). A atualização troca a tarefa de quem já tinha a 2.0; se a versão nova não subir, a volta automática restaura também a forma antiga.
+- **"Teclado novo" crítico quando o mesmo teclado muda de porta USB:** o WebGuardian agora reconhece o aparelho pelo modelo (fabricante e produto), não só pela porta. O mesmo modelo em outra porta vira só registro; modelo nunca visto continua **alerta crítico**. O aviso mostra o fabricante (Dell, Logitech…). A lista de aparelhos conhecidos é migrada sem perder nada. **Limite:** um pendrive malicioso pode imitar o modelo de um teclado que você já usa; por isso desconfie de qualquer "teclado" que você não ligou.
+- **"O arquivo indicado não existe" em driver do Windows:** caminhos de driver como `\SystemRoot\...`, `System32\drivers\...` e `\??\C:\...` agora são entendidos. O driver de pendrive do Windows (`WUDFRd.sys`, assinado pela Microsoft) deixou de dar alerta.
+
 ## 2.0.0 — 2026-11-24
 
 **Visual novo, mais segurança e novas vigilâncias**

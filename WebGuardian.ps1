@@ -60,7 +60,8 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
-$VersaoGuardiao = '2.0.0'   # 2.0.0: painel novo; confirmação do Windows para ações sensíveis; atualização conferida pela cópia
+$VersaoGuardiao = '2.1.0'   # 2.1.0: agente do painel (local, por regras, sem internet) com conversa que entende o contexto; sem janela preta ao ligar (B1); teclado pelo modelo (B2); caminhos de driver (B3)
+                            # 2.0.0: painel novo; confirmação do Windows para ações sensíveis; atualização conferida pela cópia
                             #        instalada; proxy/hosts/DNS/RDP/firewall; extensões; USB; aviso de versão; relatório; confiáveis
                             # 1.9.1: detecção de conexões: portas dos fundos, tentativas de conexão, número de processo
                             #        reaproveitado, programa trocado; sem alarme falso com rede de casa/VPN
@@ -241,6 +242,8 @@ function Write-Log([string]$Nivel, [string]$Msg, $Quando = $null) {
     Add-Content -Path $ArqLog -Value $linha -Encoding UTF8
     $cor = switch ($Nivel) { 'ALERTA' { 'Yellow' } 'ISOLADO' { 'Red' } 'CRITICO' { 'Magenta' } default { 'Gray' } }
     Write-Host $linha -ForegroundColor $cor
+    # O agente do painel recebe os alertas (menos os dele mesmo) e analisa no próximo ciclo do monitor
+    if ($Nivel -ne 'INFO' -and $null -ne $script:FilaAgente -and -not $Msg.StartsWith('[Agente]')) { [void]$script:FilaAgente.Add(@{ nivel = $Nivel; msg = $Msg; quando = $hora }) }
 }
 
 function Open-Painel {
@@ -377,7 +380,7 @@ function Get-ExeDeComando([string]$Linha) {
     if ([string]::IsNullOrWhiteSpace($Linha)) { return $null }
     $l = [Environment]::ExpandEnvironmentVariables($Linha.Trim())
     if ($l -match '^"([^"]+)"') { return $Matches[1] }
-    if ($l -match '^(.+?\.(exe|dll|bat|cmd|ps1|vbs|js|scr|com))\b') { return $Matches[1] }
+    if ($l -match '^(.+?\.(exe|dll|sys|bat|cmd|ps1|vbs|js|scr|com))\b') { return $Matches[1] }
     return ($l -split ' ')[0]
 }
 
@@ -1473,6 +1476,10 @@ function Resolve-Programa([string]$Exe) {
     # "powershell.exe" sem caminho -> C:\Windows\System32\...
     if ([string]::IsNullOrWhiteSpace($Exe)) { return $null }
     $e = [Environment]::ExpandEnvironmentVariables($Exe.Trim().Trim('"'))
+    # Bug B3: formatos de caminho de driver do evento 7045 (\SystemRoot\..., \??\C:\..., System32\drivers\x.sys)
+    if ($e.StartsWith('\??\')) { $e = $e.Substring(4) }
+    if ($e -match '(?i)^\\SystemRoot\\') { $e = Join-Path $env:SystemRoot $e.Substring(12) }
+    elseif ($e -match '(?i)^(System32|SysWOW64)\\') { $e = Join-Path $env:SystemRoot $e }
     if ([IO.Path]::IsPathRooted($e)) { return $e }
     foreach ($d in (Join-Path $env:windir 'System32'), $env:windir, (Join-Path $env:windir 'System32\WindowsPowerShell\v1.0')) {
         $c = Join-Path $d $e; if (Test-Path -LiteralPath $c) { return $c }
@@ -1722,9 +1729,16 @@ function Confirm-NoWindows([string]$Titulo, [string]$Texto) {
         return ($r -eq [System.Windows.Forms.DialogResult]::Yes)
     } catch { Write-Log 'ALERTA' "Confirmacao do Windows falhou: $_"; return $false }
 }
-function Get-TextoConfirmacao([string]$Acao, [string]$Id) {
+function Get-TextoConfirmacao([string]$Acao, [string]$Id, $Valor = $null) {
     # Devolve o texto da confirmação, ou $null se a ação não precisa dela
     switch ($Acao) {
+        # Agente: tudo o que DIMINUI a proteção passa pela janela do Windows (um vírus com a chave do painel não consegue)
+        'agenteDesfazer' {
+            $x = @((Get-Agente).acoes | Where-Object { $_.id -eq $Id -and $_.estado -eq 'ativa' }) | Select-Object -First 1
+            if ($x) { return "Desfazer a acao automatica do agente?`n$($x.acao) ($($x.alvo))" } }
+        'agenteModo'    { if ("$Valor" -eq 'sugere') { return 'Mudar o agente para "So sugere"? Ele deixa de agir sozinho em emergencias.' } }
+        'agenteRegra'   { if (-not ($Valor -eq $true -or "$Valor" -eq 'true') -and $RegrasAgente.Contains($Id)) { return "Desligar a regra de emergencia do agente?`n$($RegrasAgente[$Id].nome)" } }
+        'agentePausar'  { return 'Pausar o agente de IA? As analises e as acoes automaticas dele param (o WebGuardian continua protegendo).' }
         'liberar' {
             $alvo = @(Get-Quarentena | Where-Object { $_.Estado -eq 'ISOLADO' -and ($Id -eq 'todos' -or "$($_.Id)" -eq $Id) })
             if (-not $alvo.Count) { return $null }
@@ -1923,22 +1937,45 @@ function Get-DispositivosVigiados {
     @(Get-CimInstance Win32_PnPEntity -Filter "PNPClass='DiskDrive' OR PNPClass='Keyboard' OR PNPClass='WPD' OR PNPClass='Net'" -ErrorAction SilentlyContinue |
       Where-Object { $_.PNPClass -ne 'Net' -or "$($_.PNPDeviceID)" -like 'USB*' } |
       Where-Object { $_.PNPClass -ne 'DiskDrive' -or "$($_.PNPDeviceID)" -match '^(USBSTOR|USB|SCSI\\DISK&VEN_.*USB|SD)' } |
-      ForEach-Object { [pscustomobject]@{ Id = "$($_.PNPDeviceID)"; Nome = "$($_.Name)"; Classe = "$($_.PNPClass)" } })
+      ForEach-Object { [pscustomobject]@{ Id = "$($_.PNPDeviceID)"; Nome = "$($_.Name)"; Classe = "$($_.PNPClass)"; Fabricante = "$($_.Manufacturer)" } })
+}
+$VidsConhecidos = @{ '413C' = 'Dell'; '046D' = 'Logitech'; '045E' = 'Microsoft'; '1532' = 'Razer'; '1B1C' = 'Corsair'; '03F0' = 'HP'; '17EF' = 'Lenovo'; '04F2' = 'Chicony'; '258A' = 'Redragon'; '0951' = 'Kingston'; '0781' = 'SanDisk'; '04E8' = 'Samsung'; '05AC' = 'Apple' }
+function Get-ChaveModeloUsb([string]$Id) {
+    # Bug B2: o PNPDeviceID muda quando o mesmo aparelho vai para outra porta USB. O modelo (VID/PID) não muda.
+    if ($Id -match '(?i)VID_([0-9A-F]{4})&PID_([0-9A-F]{4})') { return ('VID_{0}&PID_{1}' -f $Matches[1].ToUpper(), $Matches[2].ToUpper()) }
+    if ($Id -match '(?i)^USBSTOR\\([^\\]+)\\([^\\&]+)') { return ('USBSTOR:{0}\{1}' -f $Matches[1].ToUpper(), $Matches[2].ToUpper()) }
+    return "$Id".ToUpper()
+}
+function Get-FabricanteUsb($D) {
+    if ("$($D.Id)" -match '(?i)VID_([0-9A-F]{4})' -and $VidsConhecidos.ContainsKey($Matches[1].ToUpper())) { return $VidsConhecidos[$Matches[1].ToUpper()] }
+    $f = "$($D.Fabricante)".Trim()
+    if ($f -and $f -notmatch '^\(|^(Microsoft|Padr|Standard|Gen[eé]ric)') { return $f }
+    return ''
 }
 function Test-Dispositivos {
     $atuais = Get-DispositivosVigiados
     if ($null -eq $script:BaseDispositivos) {
         $script:BaseDispositivos = @{}
-        if (Test-Path $ArqBaseDispositivos) { $lido = Get-Content $ArqBaseDispositivos -Raw -Encoding UTF8 | ConvertFrom-Json; foreach ($i in @($lido)) { $script:BaseDispositivos["$i"] = $true } }
-        else { foreach ($d in $atuais) { $script:BaseDispositivos[$d.Id] = $true }; ConvertTo-Json -InputObject @($script:BaseDispositivos.Keys) | Set-Content $ArqBaseDispositivos -Encoding UTF8; return }
+        # A base guarda o ID completo de cada aparelho e, desde a 2.1, também o modelo ("VID_413C&PID_2003").
+        # Bases antigas (só IDs) ganham os modelos ao carregar, sem perder nada.
+        if (Test-Path $ArqBaseDispositivos) { $lido = Get-Content $ArqBaseDispositivos -Raw -Encoding UTF8 | ConvertFrom-Json; foreach ($i in @($lido)) { if ("$i") { $script:BaseDispositivos["$i"] = $true; $script:BaseDispositivos[(Get-ChaveModeloUsb "$i")] = $true } } }
+        else { foreach ($d in $atuais) { $script:BaseDispositivos[$d.Id] = $true; $script:BaseDispositivos[(Get-ChaveModeloUsb $d.Id)] = $true }; ConvertTo-Json -InputObject @($script:BaseDispositivos.Keys) | Set-Content $ArqBaseDispositivos -Encoding UTF8; return }
     }
     $novo = $false
     foreach ($d in $atuais) {
         if ($script:BaseDispositivos.ContainsKey($d.Id)) { continue }
+        $modelo = Get-ChaveModeloUsb $d.Id
         $script:BaseDispositivos[$d.Id] = $true; $novo = $true
+        $fab = Get-FabricanteUsb $d; $nomeFab = $d.Nome; if ($fab) { $nomeFab = "$($d.Nome) (fabricante $fab)" }
+        if ($script:BaseDispositivos.ContainsKey($modelo)) {
+            # Mesmo modelo já visto neste PC, ligado em outra porta: só registra
+            Write-Log 'INFO' "[USB] Mesmo modelo, outra porta: $nomeFab ($modelo)"
+            continue
+        }
+        $script:BaseDispositivos[$modelo] = $true
         switch ($d.Classe) {
-            'Keyboard'  { Write-Log 'CRITICO' "[USB] Teclado novo conectado: $($d.Nome)"
-                          Show-Alerta 'WebGuardian: teclado novo' "$($d.Nome)`nSe voce NAO conectou um teclado agora, desconecte o dispositivo: pode ser um pendrive que digita comandos sozinho." }
+            'Keyboard'  { Write-Log 'CRITICO' "[USB] Teclado novo conectado: $nomeFab"
+                          Show-Alerta 'WebGuardian: teclado novo' "$nomeFab`nSe voce NAO conectou um teclado agora, desconecte o dispositivo: pode ser um pendrive que digita comandos sozinho." }
             'DiskDrive' { Test-Alerta 'USB' $d.Nome 'Pendrive ou HD externo conectado pela primeira vez. Arquivos dele sao verificados quando copiados para Downloads.' }
             'WPD'       { Test-Alerta 'USB' $d.Nome 'Celular ou dispositivo portatil conectado pela primeira vez.' }
             'Net'       { Test-Alerta 'USB' $d.Nome 'Placa de rede USB nova conectada. Se nao foi voce, desconecte.' }
@@ -2029,6 +2066,1049 @@ function Step-PedidoAtualizacao {
     Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $dest 'WebGuardian.ps1')`"", '-Atualizar')
 }
 
+# ===================== AGENTE DO PAINEL (local, por regras: não usa a internet) =====================
+# Analisa cada item isolado (veredito, confiança, evidências, recomendação), classifica os alertas, conversa,
+# gera relatórios e, se você deixar, age sozinho em emergência pelas regras ligadas. Contrato: AGENTE-API.md.
+# Nada sai do PC. Liberar continua pedindo a confirmação do Windows e Apagar sempre pede a sua.
+$ArqAgente = Join-Path $Pasta 'agente.json'
+$script:Agente = $null
+$script:FilaAgente = New-Object System.Collections.ArrayList     # alertas escritos por Write-Log, para o agente
+$script:AgenteMudou = $false
+$script:ProxAgenteConexoes = [datetime]::MinValue
+$script:ProxAgenteDispositivos = [datetime]::MinValue
+$script:ConexoesVistasAgente = @{}
+$ModosAgente = @('sugere', 'emergencia', 'automatico')
+$RegrasAgente = [ordered]@{
+    rede     = @{ nome = 'Desconectar da internet em invasão confirmada'; descricao = 'Logon remoto bem-sucedido vindo de um endereço da internet. O agente desliga Wi-Fi e cabo; você reconecta pelo painel.' }
+    congelar = @{ nome = 'Congelar programa sem assinatura enviando dados'; descricao = 'Programa sem assinatura digital, fora das pastas que o WebGuardian já vigia (ex.: Área de Trabalho, Documentos), conectado à internet, com confiança acima de 90%.' }
+    ip       = @{ nome = 'Bloquear IP com tentativas de senha em massa'; descricao = 'Mais de 10 senhas erradas do mesmo endereço em 10 minutos quando o WebGuardian está no modo só alertar (no modo normal ele mesmo já bloqueia com 5).' }
+}
+$TiposAgente = @{ IP = 'Endereço bloqueado'; Processo = 'Programa suspeito'; Usuario = 'Usuário novo'; Administrador = 'Administrador novo'
+                  Servico = 'Serviço novo'; Tarefa = 'Tarefa agendada nova'; Inicializacao = 'Inicialização automática'; Arquivo = 'Download suspeito'
+                  Ameaca = 'Ameaça do antivírus'; Proxy = 'Proxy configurado'; Hosts = 'Arquivo hosts alterado'; DNS = 'DNS trocado'
+                  RDP = 'Acesso remoto ligado'; Firewall = 'Regra de firewall nova' }
+
+function Add-PropAgente($Obj, [string]$Nome, $Valor) { if ($Obj.PSObject.Properties.Name -notcontains $Nome) { $Obj | Add-Member -NotePropertyName $Nome -NotePropertyValue $Valor } }
+function Get-Agente {
+    if ($script:Agente) { return $script:Agente }
+    $a = $null
+    if (Test-Path $ArqAgente) { try { $a = Get-Content $ArqAgente -Raw -Encoding UTF8 | ConvertFrom-Json } catch { $a = $null } }
+    if (-not $a) { $a = [pscustomobject]@{} }
+    Add-PropAgente $a 'modo' 'emergencia'; Add-PropAgente $a 'pausado' $false; Add-PropAgente $a 'prox' 1; Add-PropAgente $a 'ultimaAnalise' ''
+    Add-PropAgente $a 'regras' ([pscustomobject]@{}); foreach ($k in $RegrasAgente.Keys) { Add-PropAgente $a.regras $k $true }
+    foreach ($k in 'analises', 'acoes', 'relatorios', 'alertas') { Add-PropAgente $a $k @(); $a.$k = @($a.$k | Where-Object { $_ }) }
+    Add-PropAgente $a 'vistos' ([pscustomobject]@{}); Add-PropAgente $a 'semeado' $false
+    if ($ModosAgente -notcontains "$($a.modo)") { $a.modo = 'emergencia' }
+    $script:Agente = $a
+    return $a
+}
+function Save-Agente {
+    $a = Get-Agente
+    $a.analises = @($a.analises | Select-Object -Last 100); $a.acoes = @($a.acoes | Select-Object -Last 100)
+    $a.relatorios = @($a.relatorios | Select-Object -Last 14); $a.alertas = @($a.alertas | Select-Object -Last 200)
+    ConvertTo-Json -InputObject $a -Depth 8 | Set-Content $ArqAgente -Encoding UTF8
+    $script:AgenteMudou = $false
+}
+function New-IdAgente([string]$Prefixo) { $a = Get-Agente; $n = [int]$a.prox; $a.prox = $n + 1; return "$Prefixo$n" }
+function Write-LogAgente([string]$Nivel, [string]$Msg) { Write-Log $Nivel "[Agente] $Msg" }   # "[Agente]" não volta para a fila
+function Remove-Acentos([string]$Texto) {
+    $n = "$Texto".Normalize([Text.NormalizationForm]::FormD); $sb = New-Object Text.StringBuilder
+    foreach ($c in $n.ToCharArray()) { if ([Globalization.CharUnicodeInfo]::GetUnicodeCategory($c) -ne 'NonSpacingMark') { [void]$sb.Append($c) } }
+    return $sb.ToString()
+}
+function Test-AgenteAge { $a = Get-Agente; return (-not $a.pausado -and $a.modo -ne 'sugere') }
+
+# ---------- Dispositivos já vistos (para reconhecer o "mesmo teclado em outra porta", bug B2) ----------
+function Get-ChaveModelo([string]$Id) { return Get-ChaveModeloUsb $Id }
+function Update-VistosAgente {
+    $a = Get-Agente; $agora = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+    if (-not $a.semeado) {
+        if (Test-Path $ArqBaseDispositivos) { try { $b = Get-Content $ArqBaseDispositivos -Raw -Encoding UTF8 | ConvertFrom-Json; foreach ($id in @($b)) { if ($id) { Add-PropAgente $a.vistos "*|$(Get-ChaveModelo "$id")" $agora } } } catch { } }
+        $a.semeado = $true; $script:AgenteMudou = $true
+    }
+    foreach ($d in @(Get-DispositivosVigiados)) {
+        $k = "$($d.Classe)|$(Get-ChaveModelo $d.Id)"
+        if ($a.vistos.PSObject.Properties.Name -notcontains $k) { Add-PropAgente $a.vistos $k $agora; $script:AgenteMudou = $true }
+    }
+}
+function Find-VistoAgente([string]$Classe, [string]$Nome, [datetime]$Quando) {
+    $a = Get-Agente
+    foreach ($d in @(Get-DispositivosVigiados | Where-Object { $_.Classe -eq $Classe -and $_.Nome -eq $Nome })) {
+        $m = Get-ChaveModelo $d.Id
+        foreach ($k in @("$Classe|$m", "*|$m")) {
+            $v = $a.vistos.$k; if (-not $v) { continue }
+            try { $dt = [datetime]::ParseExact("$v", 'yyyy-MM-dd HH:mm:ss', $null) } catch { continue }
+            if ($dt -lt $Quando.AddMinutes(-2)) { return [pscustomobject]@{ desde = $dt; modelo = $m } }
+        }
+    }
+    return $null
+}
+function Resolve-CaminhoDriver([string]$ImagePath) {
+    # Para avisos antigos (antes da 2.1) com os formatos de driver do evento 7045: \SystemRoot\..., System32\..., \??\C:\...
+    $p = "$ImagePath".Trim().Trim('"')
+    $mm = [regex]::Match($p, '(?i)^(.+?\.(exe|sys|dll))(\s|$)'); if ($mm.Success) { $p = $mm.Groups[1].Value }
+    $p = [Environment]::ExpandEnvironmentVariables($p)
+    if ($p.StartsWith('\??\')) { $p = $p.Substring(4) }
+    if ($p -match '(?i)^\\SystemRoot\\') { $p = Join-Path $env:SystemRoot $p.Substring(12) }
+    elseif ($p -match '(?i)^(System32|SysWOW64)\\') { $p = Join-Path $env:SystemRoot $p }
+    return $p
+}
+
+# ---------- Classificação de um alerta (para a conversa, os relatórios e as regras) ----------
+function Get-ClassificacaoAlerta([string]$Nivel, [string]$Msg, [datetime]$Quando) {
+    # Devolve @{ titulo; veredito (ameaca | suspeito | falso-positivo | info); explicacao }
+    $r = { param($t, $v, $e) @{ titulo = $t; veredito = $v; explicacao = $e } }
+    if ($Msg -match '^\[USB\] Teclado novo conectado: (.+?)(?: \(fabricante [^)]+\))?$') {
+        $v = Find-VistoAgente 'Keyboard' $Matches[1].Trim() $Quando
+        if ($v) { return & $r 'Teclado conhecido em outra porta' 'falso-positivo' "Esse modelo ($($v.modelo)) já estava neste PC desde $($v.desde.ToString('dd/MM/yyyy')); ele só foi ligado em outra porta USB (bug B2)." }
+        return & $r 'Teclado novo' 'suspeito' 'Um teclado que este PC nunca viu foi ligado. Se não foi você, desconecte: pode ser um pendrive que digita comandos sozinho.'
+    }
+    if ($Msg -match '^\[USB\] (.+?) - (Pendrive|Celular|Placa de rede)') {
+        $classe = switch ($Matches[2]) { 'Pendrive' { 'DiskDrive' } 'Celular' { 'WPD' } default { 'Net' } }
+        $nome = $Matches[1].Trim()
+        if (Find-VistoAgente $classe $nome $Quando) { return & $r "$($Matches[2]) conhecido em outra porta" 'falso-positivo' "'$nome' já tinha sido ligado neste PC antes; só mudou a porta USB." }
+        return & $r "$($Matches[2]) novo" 'suspeito' "'$nome' foi ligado pela primeira vez. Se foi você, está tudo bem."
+    }
+    if ($Msg -match '^\[Servico novo\] (\S+) - o arquivo indicado nao existe: (.+)$') {
+        $cam = Resolve-CaminhoDriver $Matches[2]
+        if ((Test-Path -LiteralPath $cam) -and (Get-Editor $cam) -eq 'microsoft') { return & $r "Driver do Windows ($($Matches[1]))" 'falso-positivo' "O arquivo existe ($cam) e é assinado pela Microsoft. O WebGuardian não entendeu o formato do caminho (bug B3)." }
+        return & $r "Serviço novo ($($Matches[1]))" 'suspeito' "O serviço aponta para um arquivo que não existe: $($Matches[2])."
+    }
+    if ($Msg -match 'base de ameacas .*desatualizada|base do Defender falhou|atualizar a base do Defender') { return & $r 'Base do antivírus sem atualizar' 'info' 'Normal se o PC estava sem internet. Se continuar por mais de um dia, atualize o antivírus.' }
+    if ($Msg -match '(?i)AMEACA|encontrou \d+ ameaca|Ameaca no sistema') { return & $r 'Ameaça encontrada pelo antivírus' 'ameaca' 'O antivírus encontrou uma ameaça. Não abra o arquivo; veja a aba Decisões.' }
+    if ($Msg -match 'Defender esta DESLIGADA|NENHUM antivirus') { return & $r 'Antivírus desligado' 'ameaca' 'O PC está sem proteção em tempo real. Religue em Segurança do Windows.' }
+    if ($Msg -match 'Log de seguranca foi APAGADO') { return & $r 'Log de segurança apagado' 'ameaca' 'Apagar o registro de segurança é um sinal clássico de invasor escondendo rastros.' }
+    if ($Msg -match 'ALTERADOS depois de instalados|NAO e a versao oficial') { return & $r 'WebGuardian alterado' 'ameaca' 'Os arquivos instalados não conferem com a assinatura oficial. Reinstale a versão oficial.' }
+    if ($Msg -match 'BEM-SUCEDIDO') { return & $r 'Logon remoto vindo da internet' 'ameaca' 'Alguém entrou no PC pela rede vindo de fora. Troque a senha dessa conta usando outro aparelho.' }
+    if ($Msg -match 'NAO confirmada na janela do Windows') { return & $r 'Ação do painel não confirmada' 'suspeito' 'Normal se você cancelou. Várias seguidas sem você ter clicado podem ser um programa tentando liberar itens sozinho.' }
+    if ($Msg -match '^\[Entrada\] Senha errada') { return & $r 'Senha errada na entrada do Windows' 'suspeito' 'Se não foi você, alguém tentou entrar no PC.' }
+    if ($Msg -match '^\[Entrada\] Tentativa de entrada recusada') { return & $r 'Entrada recusada (PIN, digital ou rosto)' 'info' 'Um ou dois de vez em quando é normal.' }
+    if ($Msg -match '^\[Extensao nova\] (.+) \(([^)]+)\)') { return & $r "Extensão nova no $($Matches[2])" 'suspeito' "'$($Matches[1])': se não foi você que instalou, remova. Extensões podem ler o que você digita." }
+    if ($Msg -match '^\[Download\] (.+?) - programa SEM assinatura') { return & $r 'Programa sem assinatura baixado' 'suspeito' "'$($Matches[1])' não tem assinatura digital: só abra se confiar na origem." }
+    if ($Msg -match '^\[Download\]') { return & $r 'Download com alerta' 'suspeito' 'O WebGuardian desconfiou do arquivo baixado.' }
+    if ($Msg -match '^\[(Servico novo|Tarefa nova|Inicializacao nova)\] (.+?) - ') { return & $r "$($Matches[1] -replace 'Servico', 'Serviço' -replace 'Inicializacao', 'Inicialização'): $($Matches[2])" 'suspeito' 'Algo novo passou a rodar sozinho no Windows. Se você instalou um programa agora, é provável que seja dele.' }
+    if ($Msg -match '^#(\d+) \[(\w+)\] ') { $tp = $TiposAgente[$Matches[2]]; if (-not $tp) { $tp = $Matches[2] }; return & $r "$tp isolado (#$($Matches[1]))" 'suspeito' 'O WebGuardian isolou o item; a análise dele está na aba Decisões.' }
+    return & $r 'Alerta do WebGuardian' 'suspeito' $Msg
+}
+
+# ---------- Análise de um item isolado (o que aparece dentro do item em Decisões) ----------
+function Get-AnaliseItem($Item) {
+    $tipo = "$($Item.Tipo)"; $alvo = "$($Item.Alvo)"; $mot = "$($Item.Motivo)"; $d = $Item.Desfazer
+    $ev = New-Object System.Collections.Generic.List[string]
+    $ev.Add("Motivo do WebGuardian: $mot")
+    $v = 'suspeito'; $c = 60; $rec = 'manter'; $res = 'O WebGuardian isolou este item por precaução. Mantenha isolado até ter certeza.'
+    switch ($tipo) {
+        'Arquivo' {
+            if ($mot -match '(?i)extensao falsa|invisivel|espacos|protetor de tela|painel de controle|\.scr|\.pif|\.cpl') { $v = 'ameaca'; $c = 96; $rec = 'apagar'; $res = 'O nome do arquivo esconde que ele é um programa. É um truque típico de golpe: nenhum arquivo legítimo precisa disso.' }
+            elseif ($mot -match '(?i)ameaca|antivirus|defender') { $v = 'ameaca'; $c = 95; $rec = 'apagar'; $res = 'O antivírus apontou o arquivo como ameaça.' }
+            else { $v = 'suspeito'; $c = 70; $rec = 'manter'; $res = 'O arquivo baixado tem um formato usado em golpes. Mantenha isolado se você não esperava recebê-lo.' }
+        }
+        'Ameaca' { $v = 'ameaca'; $c = 97; $rec = 'apagar'; $res = 'O antivírus identificou esta ameaça. Liberar só faz sentido se você tiver certeza de que é alarme falso.' }
+        'Processo' {
+            $cam = "$($d.Caminho)"; $ed = ''; if ($cam) { try { $ed = Get-Editor $cam } catch { } }
+            if ($cam) { $ev.Add("Programa: $cam") }
+            if ($ed -eq 'sem-assinatura') { $ev.Add('Sem assinatura digital') } elseif ($ed -like 'assinado:*') { $ev.Add("Assinado por $($ed.Substring(9))") } elseif ($ed -eq 'microsoft') { $ev.Add('Assinado pela Microsoft') }
+            if ($mot -match '(?:conectado|tentando conectar) a (\S+)') { $ev.Add("Conexão com $($Matches[1])") }
+            if ($mot -match 'porta (\d+) aberta') { $ev.Add("Porta $($Matches[1]) aberta esperando conexões de fora") }
+            if ($ed -like 'assinado:*' -or $ed -eq 'microsoft') { $v = 'falso-positivo'; $c = 80; $rec = 'liberar'; $res = 'O programa tem assinatura digital válida de uma empresa conhecida. Provavelmente é um programa legítimo.' }
+            elseif ($mot -match 'porta \d+ aberta') { $v = 'ameaca'; $c = 92; $rec = 'apagar'; $res = 'Um programa sem assinatura deixou uma porta aberta esperando conexões da internet: é o comportamento de uma porta dos fundos.' }
+            elseif ($cam -match '(?i)\\(AppData\\Local\\Temp|Windows\\Temp|\$Recycle\.Bin|Users\\Public)\\') { $v = 'ameaca'; $c = 92; $rec = 'apagar'; $res = 'Um programa sem assinatura rodando de uma pasta temporária e falando com a internet é o padrão de ladrões de senha e programas espiões.' }
+            elseif ($cam -match '(?i)\\Downloads\\') { $v = 'suspeito'; $c = 75; $rec = 'manter'; $res = 'É um programa baixado, sem assinatura, que tentou usar a internet. Se você o abriu de propósito e confia no site, pode liberar; senão, apague.' }
+            else { $v = 'suspeito'; $c = 78; $rec = 'manter'; $res = 'Programa sem assinatura em pasta de dados de programas, usando a internet. Pode ser um atualizador legítimo; mantenha isolado se não reconhecer o nome.' }
+        }
+        'IP' {
+            $ev.Add("Endereço: $alvo")
+            if ($mot -match 'BEM-SUCEDIDO') { $v = 'ameaca'; $c = 97; $rec = 'manter'; $res = 'Alguém conseguiu entrar no PC pela rede vindo da internet. Mantenha o bloqueio e troque a senha dessa conta usando outro aparelho.' }
+            elseif ($mot -match 'senhas erradas') { $v = 'ameaca'; $c = 90; $rec = 'manter'; $res = 'Muitas senhas erradas seguidas do mesmo endereço: é alguém tentando adivinhar a senha (força bruta). Mantenha bloqueado.' }
+            else { $v = 'suspeito'; $c = 70; $rec = 'manter' }
+        }
+        'Usuario' { $v = 'suspeito'; $c = 75; $rec = 'manter'; $res = "Uma conta nova ('$alvo') foi criada no Windows e o WebGuardian a desativou. Se não foi você que criou, apague." }
+        'Administrador' { $v = 'suspeito'; $c = 80; $rec = 'manter'; $res = "A conta '$alvo' foi colocada entre os Administradores e o WebGuardian a tirou de lá. Se não foi você, mantenha assim." }
+        { $_ -in 'Servico', 'Tarefa', 'Inicializacao' } {
+            $exe = "$($d.Exe)"; if (-not $exe -and $d.Valor) { $exe = Get-ExeDeComando "$($d.Valor)" }
+            $ed = ''; if ($exe) { $ev.Add("Programa: $exe"); try { $ed = Get-Editor $exe } catch { } }
+            if ($ed -eq 'sem-assinatura') { $ev.Add('Sem assinatura digital') } elseif ($ed -like 'assinado:*') { $ev.Add("Assinado por $($ed.Substring(9))") }
+            if ($mot -match 'padrao de ataque') { $v = 'ameaca'; $c = 95; $rec = 'apagar'; $res = 'O comando tem cara de ataque: baixa algo da internet ou esconde código. Programas legítimos não se instalam assim.' }
+            elseif ($mot -match 'endereco remoto') { $v = 'ameaca'; $c = 88; $rec = 'apagar'; $res = 'Uma ferramenta do Windows foi configurada para buscar algo na internet sozinha, um truque comum de invasores.' }
+            elseif ($ed -like 'assinado:*' -or $ed -eq 'microsoft') { $v = 'falso-positivo'; $c = 75; $rec = 'liberar'; $res = 'O programa tem assinatura digital válida. Se você instalou ou atualizou algo agora, pode liberar.' }
+            elseif ($mot -match 'sem assinatura em pasta suspeita') { $v = 'ameaca'; $c = 85; $rec = 'apagar'; $res = 'Um programa sem assinatura, numa pasta usada por golpes, tentou iniciar sozinho com o Windows.' }
+            else { $v = 'suspeito'; $c = 65; $rec = 'manter'; $res = 'Algo novo tentou rodar sozinho no Windows. Se você não instalou nada agora, mantenha isolado.' }
+        }
+        { $_ -in 'Proxy', 'Hosts' } { $v = 'ameaca'; $c = 85; $rec = 'apagar'; $res = 'Essa mudança desviaria o seu acesso a sites (por exemplo, o do banco) e é um truque comum para roubar senhas. O WebGuardian já desfez; Apagar mantém desfeito.' }
+        'DNS' {
+            if ($alvo -match '\b(1\.1\.1\.1|1\.0\.0\.1|8\.8\.8\.8|8\.8\.4\.4|9\.9\.9\.9|149\.112\.112\.112|208\.67\.22[02]\.22[02])\b') { $v = 'falso-positivo'; $c = 70; $rec = 'liberar'; $res = 'O DNS novo é de um serviço público conhecido (Cloudflare, Google, Quad9 ou OpenDNS). Se foi você que trocou, pode liberar.' }
+            else { $v = 'suspeito'; $c = 80; $rec = 'apagar'; $res = 'O DNS foi trocado para um servidor desconhecido, o que pode levar você a sites falsos. Apagar mantém o DNS anterior.' }
+        }
+        'RDP' { $v = 'suspeito'; $c = 80; $rec = 'apagar'; $res = 'Alguém ligou o acesso remoto a este PC. Se você não usa Área de Trabalho Remota, Apagar mantém desligado.' }
+        'Firewall' { $v = 'ameaca'; $c = 88; $rec = 'apagar'; $res = 'Uma regra nova abria o PC para conexões vindas de fora para um programa sem assinatura.' }
+    }
+    $ev.Add("Isolado em $($Item.Quando)")
+    $tit = $TiposAgente[$tipo]; if (-not $tit) { $tit = $tipo }
+    return [pscustomobject]@{ veredito = $v; confianca = $c; recomendacao = $rec; resumo = $res; evidencias = @($ev); titulo = $tit }
+}
+
+function Add-AnaliseItem($Item) {
+    $a = Get-Agente; $r = Get-AnaliseItem $Item
+    $an = [pscustomobject]@{ id = (New-IdAgente 'a'); itemId = "$($Item.Id)"; tipo = "$($Item.Tipo)"; titulo = $r.titulo; alvo = "$($Item.Alvo)"
+                             quando = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); itemQuando = "$($Item.Quando)"; veredito = $r.veredito; confianca = $r.confianca
+                             recomendacao = $r.recomendacao; estado = 'pendente'; resumo = $r.resumo; evidencias = @($r.evidencias); decisao = '' }
+    $a.analises = @($a.analises) + $an; $a.ultimaAnalise = $an.quando; $script:AgenteMudou = $true
+    return $an
+}
+
+# ---------- Regras de emergência ----------
+function Add-AcaoAgente([string]$Tipo, [string]$Acao, [string]$Alvo, [string]$Motivo, [string]$ItemId = '', [bool]$Reversivel = $true) {
+    $a = Get-Agente
+    $x = [pscustomobject]@{ id = (New-IdAgente 'x'); tipo = $Tipo; quando = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); acao = $Acao; alvo = $Alvo; motivo = $Motivo
+                            estado = 'ativa'; reversivel = $Reversivel; itemId = $ItemId }
+    $a.acoes = @($a.acoes) + $x; $script:AgenteMudou = $true
+    Write-LogAgente 'CRITICO' "$Acao ($Alvo): $Motivo. Para desfazer: aba Agente IA > Acoes automaticas."
+    Show-Alerta 'WebGuardian: o agente agiu' "$Acao`n$Motivo"
+    return $x
+}
+function Invoke-RegraRede([string]$Motivo) {
+    if (-not (Test-AgenteAge) -or -not (Get-Agente).regras.rede) { return }
+    if (Test-Path $ArqRede) { return }   # já desconectado
+    $r = Invoke-IsolarRede
+    if ($r -match '^Nenhuma') { return }
+    [void](Add-AcaoAgente 'rede' 'Desconectou o PC da internet' 'Wi-Fi e cabo' $Motivo)
+}
+function Invoke-RegraIp([string]$Ip, [int]$Falhas) {
+    if (-not (Test-AgenteAge) -or -not (Get-Agente).regras.ip) { return }
+    $nome = "Guardiao - IP $Ip"
+    if (Get-NetFirewallRule -DisplayName "$nome*" -ErrorAction SilentlyContinue) { return }
+    New-NetFirewallRule -DisplayName "$nome (entrada)" -Group $GrupoFirewall -Direction Inbound -RemoteAddress $Ip -Action Block | Out-Null
+    New-NetFirewallRule -DisplayName "$nome (saida)" -Group $GrupoFirewall -Direction Outbound -RemoteAddress $Ip -Action Block | Out-Null
+    $motivo = "$Falhas senhas erradas em 10 min (bloqueado pelo agente)"
+    Add-Quarentena 'IP' $Ip $motivo @{ Regra = $nome }
+    $item = @(Get-Quarentena | Where-Object { $_.Tipo -eq 'IP' -and $_.Alvo -eq $Ip -and $_.Estado -eq 'ISOLADO' }) | Select-Object -Last 1
+    [void](Add-AcaoAgente 'ip' 'Bloqueou o endereço no firewall' $Ip $motivo "$($item.Id)")
+}
+function Get-CandidatoCongelar($Proc, $Conexao) {
+    # Programa sem assinatura, rodando da pasta do usuário FORA das pastas que o WebGuardian já vigia, falando com a internet
+    $cam = "$($Proc.Path)"
+    if (-not $cam -or (Test-Suspeito $cam) -or (Test-Confiavel $cam)) { return $null }
+    if ($cam -notlike "$env:SystemDrive\Users\*" -or $cam -match '(?i)\\AppData\\') { return $null }
+    if ((Get-Editor $cam) -ne 'sem-assinatura') { return $null }
+    $c = 88; $ev = @('Sem assinatura digital', "Roda de $(Split-Path $cam)", "Conectado a $($Conexao.RemoteAddress):$($Conexao.RemotePort)")
+    try { if ((Get-Item -LiteralPath $cam -ErrorAction Stop).CreationTime -gt (Get-Date).AddDays(-7)) { $c += 6; $ev += 'Arquivo criado nos últimos 7 dias' } } catch { }
+    if (@(80, 443) -notcontains [int]$Conexao.RemotePort) { $c += 4; $ev += "Porta incomum ($($Conexao.RemotePort))" }
+    return [pscustomobject]@{ caminho = $cam; confianca = [Math]::Min(98, $c); evidencias = $ev }
+}
+function Test-ConexoesAgente {
+    $a = Get-Agente
+    if ($a.pausado) { return }
+    $limite = 90; if ($a.modo -eq 'automatico') { $limite = 80 }
+    foreach ($cx in @(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { ($_.State -eq 'Established' -or $_.State -eq 'SynSent') -and -not (Test-IpPrivado $_.RemoteAddress) })) {
+        $procId = [int]$cx.OwningProcess; if ($procId -le 4 -or $procId -eq $PID) { continue }
+        $p = Get-Process -Id $procId -ErrorAction SilentlyContinue; if (-not $p -or -not $p.Path) { continue }
+        $ini = ''; try { $ini = $p.StartTime.Ticks } catch { }
+        $chave = "$procId|$($p.Path)|$ini"
+        if ($script:ConexoesVistasAgente.ContainsKey($chave)) { continue }
+        $cand = Get-CandidatoCongelar $p $cx
+        $script:ConexoesVistasAgente[$chave] = $true
+        if (-not $cand) { continue }
+        if ((Test-AgenteAge) -and $a.regras.congelar -and $cand.confianca -ge $limite) {
+            $ok = [Guardiao.Proc]::Suspend($procId)
+            $regra = "Guardiao - Programa $([IO.Path]::GetFileName($cand.caminho)) $procId"
+            New-NetFirewallRule -DisplayName $regra -Group $GrupoFirewall -Direction Outbound -Program $cand.caminho -Action Block | Out-Null
+            New-NetFirewallRule -DisplayName "$regra (entrada)" -Group $GrupoFirewall -Direction Inbound -Program $cand.caminho -Action Block | Out-Null
+            $motivo = "Programa sem assinatura enviando dados ($($cand.confianca)% de confianca; congelado pelo agente; suspenso: $ok)"
+            Add-Quarentena 'Processo' "$($cand.caminho) (PID $procId)" $motivo @{ Pid = $procId; Caminho = $cand.caminho; Regra = $regra }
+            $item = @(Get-Quarentena | Where-Object { $_.Tipo -eq 'Processo' -and $_.Estado -eq 'ISOLADO' -and "$($_.Desfazer.Pid)" -eq "$procId" }) | Select-Object -Last 1
+            [void](Add-AcaoAgente 'congelar' 'Congelou o programa e cortou a internet dele' ([IO.Path]::GetFileName($cand.caminho)) "Sem assinatura enviando dados, $($cand.confianca)% de confiança" "$($item.Id)")
+            Start-ScanDefender $cand.caminho
+        } else {
+            Write-LogAgente 'ALERTA' "Programa sem assinatura conectado a internet: $($cand.caminho) ($($cand.confianca)% de confianca). Nada foi feito (modo ou regra do agente); confira se voce reconhece."
+        }
+    }
+}
+
+# ---------- O ciclo do agente (chamado pelo monitor) ----------
+function Step-Agente {
+    $a = Get-Agente
+    $fila = @($script:FilaAgente.ToArray()); $script:FilaAgente.Clear()
+    $q = @(Get-Quarentena)
+    # Itens decididos no painel (Liberar/Apagar): a análise sai da fila; ações ligadas a eles também
+    foreach ($an in @($a.analises | Where-Object { $_.estado -eq 'pendente' })) {
+        $it = $q | Where-Object { "$($_.Id)" -eq "$($an.itemId)" } | Select-Object -First 1
+        if (-not $it -or $it.Estado -ne 'ISOLADO') { $an.estado = 'decidida'; $an.decisao = "$($it.Estado)".ToLower(); $script:AgenteMudou = $true }
+    }
+    foreach ($x in @($a.acoes | Where-Object { $_.estado -eq 'ativa' -and $_.itemId })) {
+        $it = $q | Where-Object { "$($_.Id)" -eq "$($x.itemId)" } | Select-Object -First 1
+        if ($it -and $it.Estado -eq 'LIBERADO') { $x.estado = 'desfeita'; $script:AgenteMudou = $true }
+        elseif ($it -and $it.Estado -ne 'ISOLADO') { $x.reversivel = $false; $script:AgenteMudou = $true }
+    }
+    if ($x = @($a.acoes | Where-Object { $_.estado -eq 'ativa' -and $_.tipo -eq 'rede' }) | Select-Object -First 1) {
+        if (-not (Test-Path $ArqRede)) { $x.estado = 'desfeita'; $script:AgenteMudou = $true }   # você reconectou pelo painel
+    }
+    if ((Get-Date) -ge $script:ProxAgenteDispositivos) { $script:ProxAgenteDispositivos = (Get-Date).AddSeconds(30); try { Update-VistosAgente } catch { } }
+    if (-not $a.pausado) {
+        foreach ($e in $fila) {
+            $qd = Get-Date; try { $qd = [datetime]::ParseExact($e.quando, 'yyyy-MM-dd HH:mm:ss', $null) } catch { }
+            $cl = Get-ClassificacaoAlerta $e.nivel $e.msg $qd
+            $a.alertas = @($a.alertas) + [pscustomobject]@{ quando = $e.quando; nivel = $e.nivel; msg = $e.msg; titulo = $cl.titulo; veredito = $cl.veredito; explicacao = $cl.explicacao }
+            $script:AgenteMudou = $true
+            if ($e.msg -match 'Logon remoto \(tipo \d+\) BEM-SUCEDIDO de IP externo') { Invoke-RegraRede "Logon remoto bem-sucedido vindo da internet: $($e.msg -replace '^#\d+ ', '')" }
+            if ($e.msg -match '^\[IP\] (\S+) - (\d+) senhas erradas' -and [int]$Matches[2] -ge 10) { Invoke-RegraIp $Matches[1] ([int]$Matches[2]) }
+        }
+        foreach ($it in @($q | Where-Object { $_.Estado -eq 'ISOLADO' })) {
+            if (-not (@($a.analises) | Where-Object { "$($_.itemId)" -eq "$($it.Id)" })) { try { [void](Add-AnaliseItem $it) } catch { } }
+        }
+        # Automático: segue sozinho as recomendações "manter isolado" de alta confiança (Liberar e Apagar nunca são automáticos)
+        if ($a.modo -eq 'automatico') {
+            foreach ($an in @($a.analises | Where-Object { $_.estado -eq 'pendente' -and $_.recomendacao -eq 'manter' -and [int]$_.confianca -ge 90 })) {
+                $an.estado = 'decidida'; $an.decisao = 'manter'; $script:AgenteMudou = $true
+                [void](Add-AcaoAgente 'manter' 'Manteve isolado' "#$($an.itemId) $($an.alvo)" "$($an.titulo), $($an.confianca)% de confiança" $an.itemId $false)
+            }
+        }
+        if ((Get-Date) -ge $script:ProxAgenteConexoes) { $script:ProxAgenteConexoes = (Get-Date).AddSeconds(60); try { Test-ConexoesAgente } catch { } }
+        $hoje = Get-Date -Format 'yyyy-MM-dd'
+        if ((Get-Date).Hour -ge 12 -and -not (@($a.relatorios) | Where-Object { $_.data -eq $hoje })) { try { [void](New-RelatorioAgente) } catch { } }
+    }
+    if ($script:AgenteMudou) { Save-Agente }
+}
+
+# ---------- Relatórios ----------
+function Get-LinhasLogHoje {
+    $hoje = Get-Date -Format 'yyyy-MM-dd'
+    if (-not (Test-Path $ArqLog)) { return @() }
+    return @(Get-Content $ArqLog -Encoding UTF8 | Where-Object { $_.StartsWith($hoje) })
+}
+function New-RelatorioAgente {
+    $a = Get-Agente; $hoje = Get-Date -Format 'yyyy-MM-dd'
+    $linhas = @(Get-LinhasLogHoje)
+    $alertas = @($linhas | Where-Object { $_ -match '^\S+ \S+ \[(ALERTA|CRITICO)\] ' -and $_ -notmatch '\[Agente\]' })
+    $isolados = @($linhas | Where-Object { $_ -match '^\S+ \S+ \[ISOLADO\] ' })
+    $acoesHoje = @($a.acoes | Where-Object { "$($_.quando)".StartsWith($hoje) })
+    $cls = @($a.alertas | Where-Object { "$($_.quando)".StartsWith($hoje) })
+    $falsos = @($cls | Where-Object { $_.veredito -eq 'falso-positivo' }).Count
+    $graves = @($cls | Where-Object { $_.veredito -eq 'ameaca' })
+    $pend = @($a.analises | Where-Object { $_.estado -eq 'pendente' })
+    $txt = "Hoje o WebGuardian registrou $($linhas.Count) evento(s) e deu $($alertas.Count) alerta(s)"
+    if ($cls.Count) { $txt += ": $falsos alarme(s) falso(s) conhecido(s), $($graves.Count) grave(s) e $($cls.Count - $falsos - $graves.Count) para conferir" }
+    $txt += ". $($isolados.Count) item(ns) foram isolados"
+    if ($pend.Count) { $txt += " e $($pend.Count) espera(m) a sua decisão" }
+    $txt += '.'
+    if ($acoesHoje.Count) { $txt += " O agente agiu sozinho $($acoesHoje.Count) vez(es)." } else { $txt += ' O agente não precisou agir sozinho.' }
+    $dest = New-Object System.Collections.Generic.List[string]
+    foreach ($an in @($pend | Sort-Object { -[int]$_.confianca } | Select-Object -First 3)) { $dest.Add("Decida o item #$($an.itemId) ($($an.titulo)): recomendo $((@{ apagar = 'apagar'; liberar = 'liberar'; manter = 'manter isolado' })[$an.recomendacao]) ($($an.confianca)% de confiança).") }
+    foreach ($g in @($graves | Select-Object -First 3)) { $dest.Add("$($g.titulo): $($g.explicacao)") }
+    if (@($cls | Where-Object { $_.msg -match 'BEM-SUCEDIDO' }).Count) { $dest.Add('Troque a senha da conta que entrou pela rede, usando outro aparelho.') }
+    try { $def = Get-Cacheado 'defender' 20 { Get-EstadoDefender }; if (-not $def.ok -and -not ($def.outro -and $def.outro.ligado)) { $dest.Add('Religue o antivírus: o PC está sem proteção em tempo real.') } } catch { }
+    if (-not $dest.Count) { $dest.Add('Nada para você fazer hoje.') }
+    $r = [pscustomobject]@{ id = (New-IdAgente 'r'); data = $hoje; periodo = (Get-Date -Format 'dd/MM/yyyy'); titulo = "Resumo de $(Get-Date -Format 'dd/MM')"
+                            quando = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); resumo = $txt; destaques = @($dest)
+                            numeros = [pscustomobject]@{ eventos = $linhas.Count; alertas = $alertas.Count; isolados = $isolados.Count; acoesAuto = $acoesHoje.Count } }
+    $a.relatorios = @(@($a.relatorios) | Where-Object { $_.data -ne $hoje }) + $r   # um por dia: "Gerar agora" refaz o de hoje
+    $script:AgenteMudou = $true; Save-Agente
+    return $r
+}
+
+# ---------- O campo "agente" do /api/estado ----------
+function Get-EstadoAgente {
+    $a = Get-Agente; $lim = (Get-Date).AddHours(-24)
+    $data = { param($s) try { [datetime]::ParseExact("$s", 'yyyy-MM-dd HH:mm:ss', $null) } catch { [datetime]::MinValue } }
+    $an24 = @($a.analises | Where-Object { (& $data $_.quando) -gt $lim })
+    $al24 = @($a.alertas | Where-Object { (& $data $_.quando) -gt $lim -and $_.msg -notmatch '^#\d+ \[' })
+    $tempos = @($an24 | ForEach-Object { $t0 = & $data $_.itemQuando; $t1 = & $data $_.quando; if ($t0 -gt [datetime]::MinValue) { [Math]::Max(0, ($t1 - $t0).TotalSeconds) } })
+    $tm = 0; if ($tempos.Count) { $tm = [int](($tempos | Measure-Object -Average).Average) }
+    $hoje = Get-Date -Format 'yyyy-MM-dd'
+    return @{
+        agente = @{ ativo = $true; pausado = [bool]$a.pausado; modo = "$($a.modo)"; modelo = 'Local, por regras (não usa a internet)'
+                    privacidade = 'Tudo fica neste PC: o agente lê os registros do WebGuardian aqui mesmo e não envia nada para a internet, nem metadados.'
+                    ultimaAnalise = "$($a.ultimaAnalise)" }
+        numeros = @{ analisados24h = ($an24.Count + $al24.Count); pendentes = @($a.analises | Where-Object { $_.estado -eq 'pendente' }).Count
+                     acoesAuto24h = @($a.acoes | Where-Object { (& $data $_.quando) -gt $lim }).Count; tempoMedioSeg = $tm }
+        analises = @($a.analises | Select-Object -Last 60 | ForEach-Object { @{ id = $_.id; itemId = "$($_.itemId)"; tipo = $_.tipo; titulo = $_.titulo; alvo = $_.alvo; quando = $_.quando
+                     veredito = $_.veredito; confianca = [int]$_.confianca; recomendacao = $_.recomendacao; estado = $_.estado; resumo = $_.resumo; evidencias = @($_.evidencias) } })
+        acoes = @($a.acoes | Select-Object -Last 50 | Sort-Object quando -Descending | ForEach-Object { @{ id = $_.id; quando = $_.quando; acao = $_.acao; alvo = $_.alvo; motivo = $_.motivo; estado = $_.estado; reversivel = [bool]$_.reversivel } })
+        relatorios = @($a.relatorios | Sort-Object quando -Descending | ForEach-Object {
+                     $p = $_.periodo; $t = $_.titulo; if ($_.data -eq $hoje) { $p = 'Hoje'; $t = 'Resumo de hoje' }
+                     @{ id = $_.id; periodo = $p; titulo = $t; quando = $_.quando; resumo = $_.resumo; destaques = @($_.destaques)
+                        numeros = @{ eventos = $_.numeros.eventos; alertas = $_.numeros.alertas; isolados = $_.numeros.isolados; acoesAuto = $_.numeros.acoesAuto } } })
+        regras = @($RegrasAgente.Keys | ForEach-Object { @{ id = $_; nome = $RegrasAgente[$_].nome; descricao = $RegrasAgente[$_].descricao; ligada = [bool]$a.regras.$_ } })
+        sugestoes = @('Está tudo bem?', 'O que aconteceu hoje?', 'Tem decisão pendente?', 'Preciso trocar alguma senha?', 'Quem entrou no PC hoje?', 'Quais programas estão conectados?')
+    }
+}
+
+# ---------- Ações do agente pedidas pelo painel ----------
+function Invoke-AcaoAgente([string]$Acao, [string]$Id, $Valor) {
+    $a = Get-Agente
+    switch ($Acao) {
+        'agenteSeguir' {
+            $an = @($a.analises | Where-Object { $_.id -eq $Id }) | Select-Object -First 1
+            if (-not $an) { return 'Erro: analise nao encontrada.' }
+            if ($an.estado -ne 'pendente') { return 'Esse item ja foi decidido.' }
+            if ($an.recomendacao -ne 'manter') { return "Use o botao $(if ($an.recomendacao -eq 'apagar') { 'Apagar ameaca' } else { 'Liberar' }) do item #$($an.itemId)." }
+            $an.estado = 'decidida'; $an.decisao = 'manter'; Save-Agente
+            Write-LogAgente 'INFO' "Item #$($an.itemId) mantido isolado a pedido do usuario"
+            return "Combinado: o item #$($an.itemId) continua isolado. Você pode liberar ou apagar depois." }
+        'agenteDesfazer' {
+            $x = @($a.acoes | Where-Object { $_.id -eq $Id }) | Select-Object -First 1
+            if (-not $x) { return 'Erro: acao nao encontrada.' }
+            if ($x.estado -ne 'ativa' -or -not $x.reversivel) { return 'Essa acao nao pode mais ser desfeita.' }
+            $r = switch ($x.tipo) {
+                'rede'  { Invoke-RestaurarRede }
+                default { if ($x.itemId) { Invoke-AcaoItem 'liberar' "$($x.itemId)" } else { 'Nada a desfazer.' } }
+            }
+            $x.estado = 'desfeita'; Save-Agente
+            Write-LogAgente 'INFO' "Acao automatica desfeita pelo usuario: $($x.acao) ($($x.alvo))"
+            return "Desfeito: $($x.acao). $r" }
+        'agenteModo' {
+            $m = "$Valor"; if ($ModosAgente -notcontains $m) { return 'Erro: modo invalido.' }
+            $a.modo = $m; Save-Agente; Write-LogAgente 'INFO' "Nivel de autonomia do agente: $m"
+            return "Agente em modo $(@{ sugere = '"Só sugere"'; emergencia = '"Age em emergência"'; automatico = '"Automático"' }[$m])." }
+        'agenteRegra' {
+            if (-not $RegrasAgente.Contains($Id)) { return 'Erro: regra invalida.' }
+            $ligar = ($Valor -eq $true -or "$Valor" -eq 'true')
+            $a.regras.$Id = $ligar; Save-Agente; Write-LogAgente 'INFO' "Regra de emergencia '$Id' $(if ($ligar) { 'ligada' } else { 'desligada' })"
+            return "Regra $(if ($ligar) { 'ligada' } else { 'desligada' }): $($RegrasAgente[$Id].nome)." }
+        'agentePausar'  { $a.pausado = $true; Save-Agente; Write-LogAgente 'INFO' 'Agente pausado pelo usuario'; return 'Agente pausado. O WebGuardian continua protegendo normalmente.' }
+        'agenteRetomar' { $a.pausado = $false; Save-Agente; Write-LogAgente 'INFO' 'Agente retomado pelo usuario'; return 'Agente retomado.' }
+        'agenteRelatorio' { $r = New-RelatorioAgente; return "Relatorio gerado: $($r.titulo)." }
+    }
+    return 'Acao desconhecida.'
+}
+
+# ---------- Conversa (POST /api/agente/chat) ----------
+$GlossarioAgente = [ordered]@{
+    'isolad|quarentena' = 'Isolar é prender sem apagar: o WebGuardian congela o programa, desativa a tarefa ou guarda o arquivo num lugar seguro até você decidir.'
+    'liberar'           = 'Liberar desfaz o isolamento: você diz que era seguro. O Windows pede a sua confirmação, e o programa entra na lista de confiáveis.'
+    'apagar'            = 'Apagar ameaça elimina o item isolado de vez. Arquivos do Windows ou assinados por empresa nunca são apagados.'
+    'assinatura'        = 'Assinatura digital mostra quem fez o programa e garante que ninguém o alterou. Sem assinatura não quer dizer vírus, mas não dá para saber de onde veio.'
+    'proxy'             = 'Proxy é um intermediário: se alguém configura um, todo o seu acesso à internet passa por ele, que pode ler ou trocar o que você vê.'
+    'hosts'             = 'O arquivo hosts diz ao Windows para onde levar cada site. Uma linha nova pode fazer o site do banco abrir num endereço falso.'
+    'dns'               = 'DNS traduz nomes de sites em endereços. Trocar o DNS pode levar você a sites falsos.'
+    'rdp|area de trabalho remota|acesso remoto' = 'A Área de Trabalho Remota deixa alguém controlar o PC à distância. Se você não usa, deve ficar desligada.'
+    'forca bruta'       = 'Força bruta é tentar muitas senhas seguidas até acertar. O WebGuardian bloqueia o endereço depois de 5 erros em 10 minutos.'
+    'confianca'         = 'A confiança é o quanto as pistas combinam com uma ameaça conhecida: assinatura, pasta, conexões e o motivo do isolamento.'
+    'agente'            = 'Eu sou o agente do WebGuardian: analiso o que ele isola, recomendo decisões, converso e, se você deixar, ajo sozinho em emergência. Funciono só neste PC, por regras, sem internet.'
+    'firewall'          = 'O firewall é a porta do PC para a rede: decide quem pode entrar e sair. O WebGuardian usa o firewall do Windows para bloquear endereços e programas.'
+    'falso positivo|alarme falso' = 'Alarme falso é quando o WebGuardian avisa de algo que era seu e seguro, como o mesmo teclado ligado em outra porta. Eu reconheço os casos conhecidos e digo quando é um.'
+    'extensao|extensoes' = 'Extensão é um complemento do navegador. As boas ajudam; as ruins leem o que você digita e os sites que abre. Instale só das lojas oficiais.'
+    'tarefa agendada|tarefas agendadas' = 'Tarefa agendada é algo que o Windows roda sozinho num horário ou ao ligar. Programas legítimos usam; vírus também, para voltar depois de reiniciar.'
+    'servico|servicos' = 'Serviço é um programa que roda escondido desde que o Windows liga, sem janela. Por isso o WebGuardian confere cada serviço novo.'
+    'inicializacao' = 'Inicialização são os programas que abrem sozinhos quando você entra no Windows.'
+    'phishing|golpe' = 'Golpe (phishing) é uma mensagem ou site falso que imita banco, loja ou governo para roubar senha e dinheiro. Na dúvida, abra o site digitando o endereço você mesmo.'
+    'logon remoto|acesso pela rede' = 'Logon remoto é entrar no PC pela rede, sem estar na frente dele. Vindo da internet e bem-sucedido, é sinal de invasão.'
+    'modo|autonomia|emergencia|so sugere|automatico' = 'Autonomia é o quanto eu posso agir sozinho. "Só sugere": eu só recomendo. "Age em emergência": executo as regras de emergência ligadas e aviso. "Automático": também mantenho isolado o que tem confiança muito alta. Liberar e apagar sempre ficam com você.'
+}
+function Get-ResumoAgente {
+    $a = Get-Agente; $l = New-Object System.Collections.Generic.List[string]
+    $q = @(Get-Quarentena | Where-Object { $_.Estado -eq 'ISOLADO' })
+    $def = $null; try { $def = Get-Cacheado 'defender' 20 { Get-EstadoDefender } } catch { }
+    $semAv = $def -and -not $def.ok -and -not ($def.outro -and $def.outro.ligado)
+    $hoje = Get-Date -Format 'yyyy-MM-dd'
+    $cls = @($a.alertas | Where-Object { "$($_.quando)".StartsWith($hoje) })
+    $graves = @($cls | Where-Object { $_.veredito -eq 'ameaca' })
+    $ativas = @($a.acoes | Where-Object { $_.estado -eq 'ativa' -and $_.reversivel })
+    if (-not $q.Count -and -not $graves.Count -and -not $semAv -and -not (Test-Path $ArqRede)) { $l.Add('Sim, está tudo em ordem: nada esperando decisão e nenhum alerta grave hoje.') }
+    else { $l.Add('Quase tudo em ordem, mas tem coisa para você ver:') }
+    if ($q.Count) { $l.Add("• $($q.Count) item(ns) isolado(s) esperando a sua decisão (aba Decisões).") }
+    foreach ($g in @($graves | Select-Object -First 3)) { $l.Add("• Grave: $($g.titulo). $($g.explicacao)") }
+    if ($semAv) { $l.Add('• O antivírus está desligado: religue em Segurança do Windows.') }
+    if (Test-Path $ArqRede) { $l.Add('• O PC está desconectado da internet (reconecte pelo botão no topo quando for seguro).') }
+    if ($ativas.Count) { $l.Add("• $($ativas.Count) ação(ões) automática(s) do agente ainda ativa(s) (aba Agente IA > Ações automáticas).") }
+    $l.Add("Hoje: $($cls.Count) alerta(s), $(@($cls | Where-Object { $_.veredito -eq 'falso-positivo' }).Count) deles alarme falso conhecido.")
+    if ($a.pausado) { $l.Add('Estou pausado: não analiso nem ajo até você retomar.') }
+    return ($l -join "`n")
+}
+# ---------- Entendimento da mensagem (local, por regras, sem internet) ----------
+# A mensagem vira palavras sem acento. Cada palavra é comparada com as palavras-chave de cada assunto,
+# aceitando erros de digitação (1 letra trocada, faltando, sobrando ou invertida; 2 nas palavras longas).
+# O que a mensagem não diz vem da conversa: o painel devolve em "anterior" o assunto, o item citado,
+# o período e a oferta da resposta anterior ("e ontem?", "por quê?", "fui eu", "sim").
+if (-not ('Guardiao.Texto' -as [type])) {
+    Add-Type -Namespace Guardiao -Name Texto -MemberDefinition @'
+public static int Distancia(string a, string b) {
+    int n = a.Length, m = b.Length; int[,] d = new int[n + 1, m + 1];
+    for (int i = 0; i <= n; i++) d[i, 0] = i;
+    for (int j = 0; j <= m; j++) d[0, j] = j;
+    for (int i = 1; i <= n; i++) for (int j = 1; j <= m; j++) {
+        int c = a[i - 1] == b[j - 1] ? 0 : 1;
+        d[i, j] = System.Math.Min(System.Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1), d[i - 1, j - 1] + c);
+        if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) d[i, j] = System.Math.Min(d[i, j], d[i - 2, j - 2] + 1);
+    }
+    return d[n, m];
+}
+public static bool Parecida(string palavra, string chave) {
+    if (palavra == chave) return true;
+    if (chave.Length >= 4 && palavra.StartsWith(chave)) return true;
+    if (chave.Length < 5 || palavra.Length < 4) return false;
+    int tol = chave.Length >= 8 ? 2 : 1;
+    for (int k = chave.Length - tol; k <= chave.Length + tol; k++) {
+        if (k < 1 || k > palavra.Length) continue;
+        if (Distancia(palavra.Substring(0, k), chave) <= tol) return true;
+    }
+    return false;
+}
+'@
+}
+
+# "palavra:peso" (a palavra vale como começo: "conect" pega "conectado"); "duas_palavras:peso" é frase exata
+$IntencoesAgente = [ordered]@{
+    nao_fui_eu    = 'desconheco:5 nao_fui_eu:6 nao_fui:5 nao_reconheco:6 nao_conheco:5 nem_conheco:5 nao_instalei:6 nao_baixei:6 nao_era_eu:6 nao_e_meu:5 nao_e_minha:5 nao_sei_o_que_e:4 nunca_vi:4 nao_liguei:5 nao_conectei:5 nao_mexi:5 nao_cliquei:5'
+    fui_eu        = 'fui_eu:6 eu_que:4 era_eu:6 eu_mesmo:4 eu_mesma:4 eu_instalei:6 eu_baixei:6 eu_conectei:6 eu_liguei:5 eu_mexi:5 eu_cliquei:5 reconheco:4 e_meu:4 e_minha:4 sou_eu:5 eu_troquei:5'
+    incidente     = 'hackead:4 hacker:4 hackear:4 invadi:4 invad:4 invas:4 invasor:4 roubaram:3 clonaram:3 clonad:3 sequestr:3 ransomware:4 resgate:2 medo:3 preocupad:3 assustad:3 estranho:2 esquisit:2 espiona:3 espiao:3 controlando:3 mexendo:2 golpe:2 golpista:3 alguem_mexendo:4 mouse_sozinho:4 mexendo_sozinho:4 abrindo_sozinho:4 fui_hackeado:5 fui_invadido:5'
+    status        = 'situacao:3 status:3 seguro:2 segura:2 protegido:3 protegida:3 problema:2 problemas:2 risco:2 tudo_bem:3 tudo_certo:3 tudo_ok:3 tudo_em_ordem:3 como_esta:2 como_estamos:3 como_ta:2 como_vai:2 ta_tudo:2 esta_tudo:2 como_anda:2 ta_seguro:3 estou_seguro:3 algum_problema:3'
+    saudacao      = 'oi:3 ola:3 opa:2 eai:3 salve:2 hey:2 bom_dia:3 boa_tarde:3 boa_noite:3 e_ai:3'
+    agradece      = 'obrigad:4 valeu:4 vlw:4 brigad:4 agradec:4 obg:4 thanks:3 tmj:3'
+    sim           = 'sim:4 quero:3 claro:3 ok:2 okay:2 beleza:2 blz:2 manda:2 mostra:3 mostre:3 bora:2 pode_ser:3 aham:3 uhum:3 isso_mesmo:3 pode_mostrar:4 pode:1'
+    nao           = 'nao:3 negativo:3 agora_nao:4 deixa_pra_la:4 nao_precisa:4 dispenso:3'
+    porque        = 'porque:4 motivo:4 razao:4 causa:4 pq:4 por_que:4 por_qual:3 pra_que:2 como_assim:2'
+    detalhe       = 'detalhe:4 detalhes:4 detalha:4 detalhar:4 aprofund:4 explica_melhor:4 mais_info:3 fala_mais:4 conta_mais:4 nao_entendi:3 entendi_nao:3 mais_coisa:3 completo:2 lista_toda:3 todos:1 todas:1'
+    liberar       = 'liberar:4 libera:4 libero:4 desbloque:3 desisol:4 confiar:3 confiavel:3 posso_usar:4 e_seguro:3 posso_abrir:4 posso_confiar:4'
+    apagar        = 'apagar:4 apaga:4 apago:4 excluir:4 exclui:4 deletar:4 deleta:4 remover:4 remove:4 eliminar:4 livrar:3 jogar_fora:4'
+    senha         = 'senha:4 senhas:4 vazou:3 vazament:3 vazad:3 conta_do_banco:2 minhas_contas:2'
+    entradas      = 'entrou:4 entraram:4 entrada:3 entradas:3 acessou:3 acessaram:3 login:3 logon:3 logou:3 logaram:3 ligou:2 ligaram:2 quem_usou:4 quem_mexeu:4 quem_ligou:4 quem_entrou:4 usou_o_pc:4 mexeu_no_pc:4'
+    decisoes      = 'decis:4 decid:3 pendent:4 pendenc:4 isolad:3 quarentena:4 esperando:2 aguardando:2 preciso_fazer:3 tenho_que_fazer:3 o_que_faco:3 o_que_eu_faco:3 resolver:2'
+    acoes         = 'agiu:4 voce_fez:4 fez_sozinho:5 acoes:3 acao_automatica:4 acoes_automaticas:4 automaticamente:3 congelou:4 desconectou:2 bloqueou:2 voce_bloqueou:4 voce_desconectou:4 voce_congelou:4'
+    hoje          = 'aconteceu:4 acontecendo:3 ocorreu:4 ocorrido:3 resumo:4 relatorio:4 novidade:4 novidades:4 eventos:3 movimento:2 balanco:3 historico:3 registro:2 registros:2 log:3'
+    ultimo_alerta = 'alerta:3 alertas:2 aviso:3 avisos:2 notificacao:4 notificacoes:3 apareceu:3 popup:4 pop_up:4 janelinha:3 ultimo:1 ultima:1 ultimo_alerta:4 ultimo_aviso:4 o_que_foi_isso:4 que_aviso:3 que_alerta:3'
+    conexoes      = 'conect:4 conexao:4 conexoes:4 internet:2 online:2 transmit:3 enviando:3 mandando_dados:4 baixando:2 trafego:3 dados:1 programas:1 programa:1 servidor:1 site:1 sites:1'
+    antivirus     = 'antivirus:4 defender:4 virus:3 avast:4 kaspersky:4 norton:4 mcafee:4 avg:4 eset:4 bitdefender:4 protecao:2 malware:3 varredura:3 verificacao:2 escanear:3 escaneamento:3 scan:3 tempo_real:3'
+    bloqueios     = 'bloque:3 bloqueado:4 bloqueados:4 firewall:4 ip:4 ips:4 endereco:3 enderecos:3 banido:3'
+    dispositivos  = 'teclado:4 pendrive:4 pen_drive:4 usb:4 mouse:2 celular:3 dispositivo:4 dispositivos:4 hd_externo:4 aparelho:2 aparelhos:2 porta:2 plugue:3 pluguei:3 espetei:3 conectei:1'
+    rede          = 'desconectad:4 sem_internet:5 reconect:4 internet_caiu:5 caiu_a_internet:5 internet_nao:4 cade_a_internet:5 voltar_a_internet:4 religar_a_internet:5 wifi:2 wi_fi:2'
+    controle      = 'pausar:4 pausa:2 pause:3 retomar:4 retoma:3 autonomia:4 modo:2 desligar_voce:5 te_desligar:5 regra:2 regras:2 emergencia:2 automatico:2 so_sugere:4'
+    ajuda         = 'ajuda:4 ajudar:3 help:3 comandos:4 funciona:2 funcionalidades:3 pode_fazer:4 consegue_fazer:4 sabe_fazer:4 o_que_voce_faz:5 quem_e_voce:5 quem_voce_e:5 o_que_voce_e:5 opcoes:2 menu:2'
+}
+# Assuntos que só fazem sentido dentro da conversa (respondem à mensagem anterior)
+$ConversaAgente = @('nao_fui_eu', 'fui_eu', 'saudacao', 'agradece', 'sim', 'nao', 'porque', 'detalhe', 'liberar', 'apagar')
+$PerguntaIntencao = @{ status = 'Está tudo bem?'; incidente = 'Fui invadido?'; senha = 'Preciso trocar alguma senha?'; entradas = 'Quem entrou no PC hoje?'
+    decisoes = 'Tem decisão pendente?'; acoes = 'O que você fez sozinho?'; hoje = 'O que aconteceu hoje?'; ultimo_alerta = 'Qual foi o último aviso?'
+    conexoes = 'Quais programas estão conectados?'; antivirus = 'Como está o antivírus?'; bloqueios = 'Tem IP bloqueado?'; dispositivos = 'Que dispositivos USB estão ligados?'
+    rede = 'Por que estou sem internet?'; controle = 'Qual é a minha autonomia?'; ajuda = 'O que você sabe fazer?' }
+$AssuntoIntencao = @{ status = 'a situação geral do PC'; incidente = 'sinais de invasão'; senha = 'trocar senhas'; entradas = 'quem entrou no PC'
+    decisoes = 'as decisões pendentes'; acoes = 'o que eu fiz sozinho'; hoje = 'o que aconteceu'; ultimo_alerta = 'o último aviso'
+    conexoes = 'os programas conectados à internet'; antivirus = 'o antivírus'; bloqueios = 'os endereços bloqueados'; dispositivos = 'os dispositivos USB'
+    rede = 'a internet desconectada'; controle = 'a minha autonomia'; ajuda = 'o que eu sei fazer' }
+# Programas que as pessoas costumam perguntar
+$ProgramasAgente = [ordered]@{
+    'anydesk|teamviewer|rustdesk|ultraviewer|supremo|ammyy' = 'é um programa de acesso remoto: deixa outra pessoa ver e controlar o seu PC. Golpistas pedem para instalar dizendo ser do banco ou do suporte. Se alguém pediu por telefone, feche, desinstale e não passe nenhum código.'
+    'svchost'           = 'é um processo do Windows que roda serviços do sistema. Vários ao mesmo tempo é normal; desconfie só se estiver fora de C:\Windows\System32.'
+    'powershell|cmd'    = 'é o terminal do Windows. Programas e o próprio WebGuardian usam, mas invasores também: o WebGuardian vigia os comandos dele.'
+    'conhost'           = 'é a janela de console do Windows. Sozinho é inofensivo; com --headless ele roda outro programa escondido.'
+    'rundll32|mshta|regsvr32|wscript|cscript|certutil|bitsadmin' = 'é uma ferramenta do Windows muito usada em ataques para rodar código escondido. O WebGuardian confere o que ela abre.'
+    'explorer'          = 'é o Explorador de Arquivos e a barra de tarefas do Windows.'
+    'msedge|chrome|firefox|opera|brave' = 'é um navegador de internet. É normal estar conectado; o risco está nas extensões e nos downloads.'
+    'onedrive|dropbox|googledrive' = 'é um serviço de nuvem: sincroniza arquivos com a internet o tempo todo, o que é normal.'
+}
+
+function ConvertTo-TextoAgente([string]$Texto) {
+    # " palavras sem acento " (os pontos só ficam dentro de números, como nos IPs)
+    $x = (Remove-Acentos $Texto).ToLower() -replace '[^\w\s#\.]', ' ' -replace '(?<!\d)\.|\.(?!\d)', ' ' -replace '\s+', ' '
+    return " $($x.Trim()) "
+}
+$script:IntencoesLidas = $null
+function Get-IntencoesLidas {
+    if ($script:IntencoesLidas) { return $script:IntencoesLidas }
+    $r = [ordered]@{}
+    foreach ($k in $IntencoesAgente.Keys) {
+        $pal = New-Object System.Collections.Generic.List[object]; $fr = New-Object System.Collections.Generic.List[object]
+        foreach ($p in ($IntencoesAgente[$k] -split '\s+')) {
+            if (-not $p) { continue }
+            $x = $p -split ':'; $peso = 1; if ($x.Count -gt 1) { $peso = [double]$x[1] }
+            if ($x[0].Contains('_')) { $fr.Add(@{ t = " $($x[0].Replace('_', ' ')) "; p = $peso }) } else { $pal.Add(@{ t = $x[0]; p = $peso }) }
+        }
+        $r[$k] = @{ palavras = $pal; frases = $fr }
+    }
+    $script:IntencoesLidas = $r
+    return $r
+}
+function Get-PontosAgente([string]$T) {
+    # Devolve @{ intencao = pontos } só com o que pontuou
+    $pal = @($T.Trim() -split ' ' | Where-Object { $_ })
+    $pts = @{}
+    $lidas = Get-IntencoesLidas
+    foreach ($k in $lidas.Keys) {
+        $s = 0
+        foreach ($f in $lidas[$k].frases) { if ($T.Contains($f.t)) { $s += $f.p } }
+        foreach ($w in $lidas[$k].palavras) { foreach ($p in $pal) { if ([Guardiao.Texto]::Parecida($p, $w.t)) { $s += $w.p; break } } }
+        if ($s -gt 0) { $pts[$k] = $s }
+    }
+    if ($pts['nao_fui_eu'] -ge 4) { $pts.Remove('fui_eu') }
+    return $pts
+}
+function Get-MelhorAgente($Pts, [bool]$Topico) {
+    $m = $null; $v = 0
+    foreach ($k in $IntencoesAgente.Keys) {
+        if (-not $Pts.ContainsKey($k)) { continue }
+        if ($Topico -and $ConversaAgente -contains $k) { continue }
+        if ($Pts[$k] -gt $v) { $m = $k; $v = $Pts[$k] }
+    }
+    return @{ intencao = $m; pontos = $v }
+}
+function Get-RotuloPeriodo([string]$P) { switch ($P) { 'ontem' { return 'Ontem' } 'semana' { return 'Nos últimos 7 dias' } default { return 'Hoje' } } }
+function Get-EntidadesAgente([string]$T, [string]$Original) {
+    $e = @{ periodo = ''; hora = $null; ip = ''; item = ''; programa = ''; pronome = $false; seguimento = $false; termo = '' }
+    if ($T -match ' (ontem) ') { $e.periodo = 'ontem' }
+    elseif ($T -match ' (semana|7 dias|sete dias|ultimos dias|esses dias|estes dias|ultimamente|anteontem) ') { $e.periodo = 'semana' }
+    elseif ($T -match ' (hoje|hj|agora|ate agora) ') { $e.periodo = 'hoje' }
+    if ($T -match ' as (\d{1,2})( ?h| horas| hora|:\d\d)?\b' -and [int]$Matches[1] -le 23) { $e.hora = [int]$Matches[1] }
+    elseif ($T -match ' (\d{1,2}) ?h\b' -and [int]$Matches[1] -le 23) { $e.hora = [int]$Matches[1] }
+    $mi = [regex]::Match($Original, '\b(\d{1,3}(?:\.\d{1,3}){3})\b'); if ($mi.Success) { $e.ip = $mi.Groups[1].Value }
+    if ($T -match '#\s?(\d{1,6})\b') { $e.item = $Matches[1] } elseif ($T -match ' (item|numero|n) (\d{1,6}) ') { $e.item = $Matches[2] }
+    if ($T -match ' (isso|esse|essa|este|esta coisa|ele|ela|dele|dela|aquilo|aquele|aquela|nisso|disso) ') { $e.pronome = $true }
+    if ($T -match '^ (e|mas|entao|e quanto|e sobre|e o|e a|e os|e as|e no|e na) ') { $e.seguimento = $true }
+    $q = [regex]::Match($T, ' (?:o que e|o que sao|que e|que sao|o que significa|significa|quer dizer|como funciona|pra que serve|para que serve|o que faz) (?:o |a |os |as |um |uma )?([a-z0-9][\w\. ]{1,40}?) ?$')
+    if ($q.Success) { $e.termo = $q.Groups[1].Value.Trim() }
+    if ($e.termo -match '^(isso|esse|essa|este|esta|ele|ela|aquilo|aquele|aquela|esse aviso|esse alerta|isso ai|isto)$') { $e.termo = '' }
+    return $e
+}
+function Get-NomesProgramaAgente([bool]$ComConexoes) {
+    # Nomes de programas que o WebGuardian conhece agora (sem .exe, minúsculos)
+    $n = @{}
+    $add = { param($x) $b = "$x".Trim().ToLower(); if ($b -match '^(.+)\.(exe|dll|ps1|bat|cmd|vbs|js|scr|msi|sys)$') { $b = $Matches[1] }; if ($b.Length -ge 3 -and $b -match '^[a-z][\w\.\-]*$') { $n[$b] = $true } }
+    foreach ($q in @(Get-Quarentena)) { try { & $add ([IO.Path]::GetFileName("$($q.Alvo)")) } catch { } }
+    foreach ($p in @(Get-Process -ErrorAction SilentlyContinue)) { & $add $p.ProcessName }
+    if ($ComConexoes) { try { $cx = Get-Cacheado 'conexoes' 8 { Get-ConexoesExternas }; foreach ($c in @($cx | Where-Object { $_ -and $_.pid })) { & $add $c.nome } } catch { } }
+    foreach ($k in $ProgramasAgente.Keys) { foreach ($x in $k -split '\|') { $n[$x] = $true } }
+    foreach ($x in 'system', 'idle', 'registry', 'memory', 'secure', 'services', 'csrss', 'smss', 'wininit') { $n.Remove($x) }
+    return $n
+}
+function Find-ProgramaAgente([string]$T, [bool]$ComConexoes) {
+    $nomes = Get-NomesProgramaAgente $ComConexoes
+    foreach ($p in @($T.Trim() -split ' ' | Where-Object { $_.Length -ge 4 })) {
+        $p2 = $p -replace '\.exe$', ''
+        if ($nomes.ContainsKey($p2)) { return $p2 }
+    }
+    return ''
+}
+function New-RespostaAgente([string]$Texto, $Fontes = @(), [string]$Intencao = '', [string]$Ref = '', [string]$Oferta = '', $Sugestoes = @(), [string]$Periodo = '') {
+    return @{ resposta = $Texto; fontes = @($Fontes | Where-Object { $_ }); sugestoes = @($Sugestoes | Where-Object { $_ } | Select-Object -First 4)
+              anterior = @{ intencao = $Intencao; ref = $Ref; oferta = $Oferta; periodo = $Periodo } }
+}
+function Get-LinhasLogPeriodo([string]$Periodo) {
+    if (-not (Test-Path $ArqLog)) { return }
+    $fim = (Get-Date).ToString('yyyy-MM-dd'); $ini = $fim
+    if ($Periodo -eq 'ontem') { $ini = (Get-Date).AddDays(-1).ToString('yyyy-MM-dd'); $fim = $ini }
+    elseif ($Periodo -eq 'semana') { $ini = (Get-Date).AddDays(-6).ToString('yyyy-MM-dd') }
+    $r = New-Object System.Collections.Generic.List[string]
+    foreach ($l in [IO.File]::ReadLines($ArqLog, [Text.Encoding]::UTF8)) {
+        if ($l.Length -lt 19) { continue }
+        $d = $l.Substring(0, 10)
+        if ([string]::CompareOrdinal($d, $ini) -ge 0 -and [string]::CompareOrdinal($d, $fim) -le 0) { $r.Add($l) }
+    }
+    return $r.ToArray()
+}
+function Format-LinhaLogAgente([string]$Linha, [bool]$ComData) {
+    $mm = [regex]::Match($Linha, '^(\d{4})-(\d\d)-(\d\d) (\d\d:\d\d):\d\d \[(\w+)\] (.*)$')
+    if (-not $mm.Success) { return "• $Linha" }
+    $q = $mm.Groups[4].Value; if ($ComData) { $q = "$($mm.Groups[3].Value)/$($mm.Groups[2].Value) $q" }
+    $niv = @{ ALERTA = '(alerta) '; CRITICO = '(crítico) '; ISOLADO = '(isolado) ' }[$mm.Groups[5].Value]
+    return "• $q $niv$($mm.Groups[6].Value)"
+}
+
+# ---------- Respostas sobre um item, um aviso, um programa ou um IP ----------
+function Get-RespostaItemAgente([string]$ItemId, [string]$Modo) {
+    $a = Get-Agente
+    $an = @($a.analises | Where-Object { "$($_.itemId)" -eq $ItemId }) | Select-Object -Last 1
+    $q = @(Get-Quarentena | Where-Object { "$($_.Id)" -eq $ItemId }) | Select-Object -First 1
+    if (-not $an -and -not $q) { return New-RespostaAgente "Não achei o item #$ItemId. Os números ficam na aba Decisões, ao lado de cada item." @() 'decisoes' }
+    $f = @(@{ tipo = 'análise'; id = "#$ItemId" }); $ref = "item:$ItemId"
+    $tp = ''; if ($q) { $tp = $TiposAgente["$($q.Tipo)"]; if (-not $tp) { $tp = "$($q.Tipo)" } }
+    if (-not $an) {
+        return New-RespostaAgente "#$ItemId ${tp}: $($q.Alvo). Estado: $("$($q.Estado)".ToLower()), desde $($q.Quando).`nMotivo: $($q.Motivo)" $f 'item' $ref
+    }
+    $vt = @{ ameaca = 'provável ameaça'; suspeito = 'suspeito'; 'falso-positivo' = 'provável alarme falso' }[$an.veredito]
+    $rc = @{ apagar = 'apagar a ameaça'; liberar = 'liberar o item'; manter = 'manter isolado e observar' }[$an.recomendacao]
+    $decidido = ($an.estado -ne 'pendente') -or ($q -and "$($q.Estado)" -ne 'ISOLADO')
+    $estadoTxt = if ($q) { "$($q.Estado)".ToLower() } else { "$($an.estado)" }
+    $sug = @('Por quê?', 'Fui eu', 'Não fui eu', 'Mais detalhes')
+    switch ($Modo) {
+        'liberar' {
+            if ($decidido) { return New-RespostaAgente "O #$ItemId já foi decidido (está $estadoTxt)." $f 'item' $ref }
+            if ($an.recomendacao -eq 'liberar') { return New-RespostaAgente "Pode liberar o #$ItemId se você reconhece o que é. $($an.resumo) O Windows vai pedir a sua confirmação." $f 'item' $ref }
+            return New-RespostaAgente "Eu não liberaria o #$($ItemId): $vt ($($an.confianca)% de confiança). $($an.resumo) Só libere se tiver certeza de onde ele veio." $f 'item' $ref '' @('Por quê?', 'Fui eu', 'Não fui eu')
+        }
+        'apagar' {
+            if ($decidido) { return New-RespostaAgente "O #$ItemId já foi decidido (está $estadoTxt)." $f 'item' $ref }
+            if ($an.recomendacao -eq 'apagar') { return New-RespostaAgente "Sim, recomendo apagar o #$ItemId. $($an.resumo) Apagar não tem volta, por isso o painel pede a sua confirmação." $f 'item' $ref }
+            return New-RespostaAgente "Apagar o #$ItemId não é necessário agora: a minha recomendação é $rc. Isolado, ele não faz mal. Apague se tiver certeza de que não é seu." $f 'item' $ref
+        }
+        'fui_eu' {
+            if ($decidido) { return New-RespostaAgente "Certo. O #$ItemId já foi decidido (está $estadoTxt), então não há nada a fazer." $f 'item' $ref }
+            if ($an.veredito -eq 'ameaca') { return New-RespostaAgente "Mesmo tendo sido você, eu não liberaria o #$($ItemId): $($an.resumo) Se veio de um site oficial e você tem certeza, use o botão Liberar no item; o Windows pede a sua confirmação." $f 'item' $ref }
+            return New-RespostaAgente "Então é seu: pode liberar o #$ItemId pelo botão Liberar no item (o Windows pede a sua confirmação). Ele entra na lista de programas confiáveis e não é isolado de novo." $f 'item' $ref
+        }
+        'nao_fui_eu' {
+            $l = New-Object System.Collections.Generic.List[string]
+            $l.Add("Então deixe o #$ItemId isolado: assim ele não faz mal.")
+            if ($an.recomendacao -eq 'apagar') { $l.Add('Recomendo apagar pelo botão Apagar ameaça no item.') }
+            switch ("$($an.tipo)") {
+                'IP'            { if ("$($q.Motivo)" -match 'BEM-SUCEDIDO') { $l.Add('Alguém entrou pela rede: troque a senha da sua conta do Windows usando outro aparelho.') } else { $l.Add('O endereço continua bloqueado no firewall.') } }
+                'Usuario'       { $l.Add('A conta nova continua desativada. Se você não a criou, apague.') }
+                'Administrador' { $l.Add('A conta perdeu o poder de administrador. Troque a sua senha do Windows.') }
+                { $_ -in 'Proxy', 'Hosts', 'DNS' } { $l.Add("Troque as senhas dos sites que você usou desde $($an.itemQuando), usando outro aparelho.") }
+                { $_ -in 'Processo', 'Arquivo', 'Servico', 'Tarefa', 'Inicializacao', 'Ameaca' } { $l.Add('Rode uma verificação completa do antivírus.') }
+                'RDP'           { $l.Add('Deixe a Área de Trabalho Remota desligada.') }
+            }
+            return New-RespostaAgente ($l -join ' ') $f 'item' $ref
+        }
+        'porque' {
+            $mot = if ($q) { "$($q.Motivo)" } else { "$($an.resumo)" }
+            $ev = @($an.evidencias | ForEach-Object { "• $_" }) -join "`n"
+            return New-RespostaAgente "O WebGuardian isolou o #$ItemId porque: $mot`nO que eu vi:`n$ev`nPor isso considero $vt, com $($an.confianca)% de confiança." $f 'item' $ref '' @('Fui eu', 'Não fui eu')
+        }
+    }
+    $ev = @($an.evidencias | ForEach-Object { "• $_" }) -join "`n"
+    $txt = "#$($ItemId) $($an.titulo): $vt, com $($an.confianca)% de confiança.`n$($an.resumo)`nO que eu vi:`n$ev`nRecomendação: $rc."
+    if ($Modo -eq 'detalhe' -and $q) { $txt += "`nAlvo: $($q.Alvo)`nMotivo registrado: $($q.Motivo)`nIsolado em $($q.Quando); estado: $estadoTxt." }
+    if ($decidido) { $sug = @() }
+    return New-RespostaAgente $txt $f 'item' $ref '' $sug
+}
+function Get-RespostaAlertaAgente([string]$Quando, [string]$Modo) {
+    $a = Get-Agente
+    $x = @($a.alertas | Where-Object { "$($_.quando)" -eq $Quando }) | Select-Object -Last 1
+    if (-not $x) { return New-RespostaAgente 'Não achei mais esse aviso nos meus registros.' }
+    $ref = "alerta:$Quando"; $hh = "$Quando".Substring(11, 5); $msg = "$($x.msg)"
+    switch ($Modo) {
+        'fui_eu' {
+            $t = 'Então não é preciso fazer nada. Obrigado por confirmar.'
+            if ($x.veredito -eq 'ameaca') { $t = "Mesmo assim, atenção: $($x.explicacao)" }
+            elseif ($msg -match '^\[USB\]') { $t = 'Então está tudo certo. Eu guardo o modelo: se ele for ligado em outra porta, reconheço.' }
+            elseif ($msg -match 'Senha errada') { $t = 'Certo, senha digitada errada acontece. Se aparecerem muitas seguidas sem ser você, eu aviso.' }
+            elseif ($msg -match '^\[Download\]') { $t = 'Tudo bem. Só abra se veio de um site oficial.' }
+            elseif ($msg -match '^\[(Servico novo|Tarefa nova|Inicializacao nova)\]') { $t = 'Então deve ser do programa que você instalou. Se ele estiver isolado, libere em Decisões.' }
+            elseif ($msg -match '^\[Extensao nova\]') { $t = 'Certo. Mantenha só extensões de lojas oficiais e de empresas que você conhece.' }
+            return New-RespostaAgente $t @() 'alerta' $ref
+        }
+        'nao_fui_eu' {
+            $t = "Então vale olhar com calma: $($x.explicacao) Se algo mais estranho acontecer, use Desconectar da internet no topo do painel."
+            if ($msg -match '^\[USB\]') { $t = 'Desconecte esse dispositivo agora. Depois pergunte "o que aconteceu hoje?" para ver se ele fez alguma coisa.' }
+            elseif ($msg -match 'BEM-SUCEDIDO') { $t = 'Troque a senha dessa conta agora, usando outro aparelho, e deixe o PC desconectado da internet até lá (botão no topo do painel).' }
+            elseif ($msg -match 'Senha errada') { $t = 'Alguém tentou entrar no PC. Use uma senha forte e bloqueie a tela ao sair (tecla Windows + L).' }
+            elseif ($msg -match '^\[Extensao nova\]') { $t = 'Remova a extensão no navegador e troque as senhas dos sites que você usou desde então.' }
+            elseif ($msg -match '^\[Download\]') { $t = 'Apague o arquivo sem abrir.' }
+            elseif ($msg -match '^\[(Servico novo|Tarefa nova|Inicializacao nova)\]') { $t = 'Deixe isolado em Decisões e rode uma verificação completa do antivírus.' }
+            return New-RespostaAgente $t @() 'alerta' $ref '' @('O que aconteceu hoje?', 'Fui invadido?')
+        }
+    }
+    $vt = @{ ameaca = 'grave'; suspeito = 'para conferir'; 'falso-positivo' = 'alarme falso conhecido'; info = 'só informação' }[$x.veredito]
+    $txt = "${hh}: $($x.titulo) ($vt).`n$($x.explicacao)"
+    if ($Modo -in 'porque', 'detalhe') { $txt += "`nO registro do WebGuardian diz: $msg" }
+    $sug = @(); if ($x.veredito -ne 'falso-positivo' -and $x.veredito -ne 'info') { $sug = @('Fui eu', 'Não fui eu', 'Por quê?') }
+    return New-RespostaAgente $txt @() 'alerta' $ref '' $sug
+}
+function Get-RespostaProgramaAgente([string]$Nome) {
+    $a = Get-Agente; $l = New-Object System.Collections.Generic.List[string]; $f = @()
+    foreach ($k in $ProgramasAgente.Keys) { if (" $($k -replace '\|', ' ') " -match " $([regex]::Escape($Nome)) ") { $l.Add("$Nome $($ProgramasAgente[$k])"); break } }
+    $procs = @(Get-Process -Name $Nome -ErrorAction SilentlyContinue)
+    if ($procs.Count) {
+        $cam = "$(@($procs | Where-Object { $_.Path } | Select-Object -First 1).Path)"
+        $ed = if ($cam) { Get-Editor $cam } else { '' }
+        $edTxt = switch -Wildcard ($ed) { 'microsoft' { ', assinado pela Microsoft' } 'assinado:*' { ", assinado por $($ed.Substring(9))" } 'sem-assinatura' { ', SEM assinatura digital' } default { '' } }
+        $l.Add("Está aberto agora ($($procs.Count) processo(s))$(if ($cam) { " em $cam" })$edTxt.")
+    } else { $l.Add('Não está aberto agora.') }
+    try {
+        $cx = Get-Cacheado 'conexoes' 8 { Get-ConexoesExternas }
+        $c = @($cx | Where-Object { $_ -and $_.pid -and "$($_.nome)".ToLower() -eq $Nome })
+        if ($c.Count) { $l.Add("Conectado à internet: $(@($c | ForEach-Object { $_.destinos }) -join ', ')$(if (@($c | Where-Object { $_.suspeito }).Count) { ' (SUSPEITO: está numa pasta onde vírus costumam ficar)' }).") }
+    } catch { }
+    $qi = @(Get-Quarentena | Where-Object { "$($_.Alvo)" -match "(?i)(^|\\)$([regex]::Escape($Nome))(\.exe)?$" })
+    foreach ($q in @($qi | Select-Object -Last 3)) { $l.Add("Item #$($q.Id) ($("$($q.Estado)".ToLower())): $($q.Motivo)"); $f += @{ tipo = 'análise'; id = "#$($q.Id)" } }
+    $lim = (Get-Date).AddDays(-7).ToString('yyyy-MM-dd')
+    $al = @($a.alertas | Where-Object { "$($_.quando)" -ge $lim -and "$($_.msg)" -match "(?i)\b$([regex]::Escape($Nome))\b" })
+    if ($al.Count) { $u = $al[-1]; $l.Add("$($al.Count) aviso(s) com ele nos últimos 7 dias; o último às $("$($u.quando)".Substring(11, 5)) de $("$($u.quando)".Substring(8, 2))/$("$($u.quando)".Substring(5, 2)): $($u.titulo).") }
+    elseif (-not $qi.Count) { $l.Add('O WebGuardian não deu nenhum aviso sobre ele nos últimos 7 dias.') }
+    return New-RespostaAgente ($l -join "`n") $f 'programa' "programa:$Nome" '' @('Quais programas estão conectados?')
+}
+function Get-RespostaIpAgente([string]$Ip) {
+    $l = New-Object System.Collections.Generic.List[string]; $f = @()
+    $priv = $false; try { $priv = Test-IpPrivado $Ip } catch { }
+    $l.Add($(if ($priv) { "$Ip é um endereço da sua rede local (roteador, outro PC, celular ou TV)." } else { "$Ip é um endereço da internet." }))
+    foreach ($q in @(Get-Quarentena | Where-Object { $_.Tipo -eq 'IP' -and "$($_.Alvo)" -eq $Ip })) { $l.Add("Item #$($q.Id) ($("$($q.Estado)".ToLower())): $($q.Motivo)"); $f += @{ tipo = 'análise'; id = "#$($q.Id)" } }
+    $ln = @(Get-LinhasLogPeriodo 'semana' | Where-Object { $_.Contains($Ip) })
+    if ($ln.Count) { $l.Add("Aparece $($ln.Count) vez(es) no registro dos últimos 7 dias. As últimas:"); foreach ($x in @($ln | Select-Object -Last 3)) { $l.Add((Format-LinhaLogAgente $x $true)) } }
+    else { $l.Add('Não aparece no registro do WebGuardian dos últimos 7 dias.') }
+    try { $cx = Get-Cacheado 'conexoes' 8 { Get-ConexoesExternas }; $c = @($cx | Where-Object { $_ -and $_.pid -and "$($_.destinos)".Contains("${Ip}:") }); if ($c.Count) { $l.Add("Agora $(@($c | ForEach-Object { $_.nome }) -join ', ') está conectado a ele.") } } catch { }
+    return New-RespostaAgente ($l -join "`n") $f 'ip' "ip:$Ip"
+}
+
+# ---------- Respostas por assunto ----------
+function Get-RespostaIntencaoAgente([string]$Int, $Ent, [string]$Ref, [bool]$Detalhe) {
+    $a = Get-Agente; $per = "$($Ent.periodo)"; $rot = Get-RotuloPeriodo $per
+    switch ($Int) {
+        'status' {
+            $p = @($a.analises | Where-Object { $_.estado -eq 'pendente' }).Count
+            $sug = @('O que aconteceu hoje?'); if ($p) { $sug = @('Tem decisão pendente?') + $sug }
+            return New-RespostaAgente (Get-ResumoAgente) @() 'status' '' 'hoje' $sug
+        }
+        'saudacao' {
+            $h = (Get-Date).Hour; $oi = if ($h -lt 12) { 'Bom dia!' } elseif ($h -lt 18) { 'Boa tarde!' } else { 'Boa noite!' }
+            $r1 = (Get-ResumoAgente) -split "`n"
+            return New-RespostaAgente "$oi $($r1[0]) Em que posso ajudar?" @() 'status' '' 'hoje' @('O que aconteceu hoje?', 'Tem decisão pendente?', 'O que você sabe fazer?')
+        }
+        'incidente' {
+            $l = New-Object System.Collections.Generic.List[string]; $ok = New-Object System.Collections.Generic.List[string]; $f = @()
+            $ontem = (Get-Date).AddDays(-1).ToString('yyyy-MM-dd')
+            $rem = @(Get-Quarentena | Where-Object { $_.Tipo -eq 'IP' -and "$($_.Motivo)" -match 'BEM-SUCEDIDO' -and "$($_.Quando)" -ge $ontem })
+            if ($rem.Count) { $l.Add("Alguém entrou pela rede vindo da internet ($(@($rem | ForEach-Object { $_.Alvo }) -join ', ')). Troque a senha do Windows usando outro aparelho."); $f += @($rem | ForEach-Object { @{ tipo = 'análise'; id = "#$($_.Id)" } }) } else { $ok.Add('ninguém entrou pela rede vindo da internet') }
+            $linhas = @(@(Get-LinhasLogPeriodo 'ontem') + @(Get-LinhasLogPeriodo 'hoje'))
+            $erradas = @($linhas | Where-Object { $_ -match '\[Entrada\] Senha errada' }).Count
+            if ($erradas -ge 3) { $l.Add("$erradas senhas erradas na entrada do Windows desde ontem.") } else { $ok.Add('sem tentativas de senha em massa') }
+            $pend = @(Get-Quarentena | Where-Object { $_.Estado -eq 'ISOLADO' })
+            if ($pend.Count) { $l.Add("$($pend.Count) item(ns) isolado(s) esperando decisão: o que o WebGuardian pegou já está preso.") } else { $ok.Add('nada isolado esperando decisão') }
+            $cx = @(); try { $cx = Get-Cacheado 'conexoes' 8 { Get-ConexoesExternas }; $cx = @($cx | Where-Object { $_ -and $_.pid -and $_.suspeito }) } catch { }
+            if ($cx.Count) { $l.Add("Programa(s) suspeito(s) conectado(s) agora: $(@($cx | ForEach-Object { $_.nome }) -join ', ').") } else { $ok.Add('nenhum programa suspeito conectado') }
+            $remotos = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(anydesk|teamviewer|rustdesk|ultraviewer|supremo|ammyy)' } | ForEach-Object { $_.ProcessName } | Select-Object -Unique)
+            if ($remotos.Count) { $l.Add("Programa de acesso remoto aberto: $($remotos -join ', '). Se você não abriu, feche e desinstale: é por ele que alguém controlaria o PC.") }
+            try { $d = Get-Cacheado 'defender' 20 { Get-EstadoDefender }; if (-not $d.ok -and -not ($d.outro -and $d.outro.ligado)) { $l.Add('O antivírus está desligado.') } else { $ok.Add('antivírus ligado') } } catch { }
+            if (Test-Path $ArqRede) { $ok.Add('a internet já está desconectada') }
+            if ($l.Count) {
+                $txt = "Vamos conferir juntos. Encontrei pontos que pedem atenção:`n$(@($l | ForEach-Object { "• $_" }) -join "`n")"
+                if (-not (Test-Path $ArqRede)) { $txt += "`nSe acha que alguém está mexendo no PC agora, use Desconectar da internet no topo do painel: ninguém de fora continua conectado." }
+            } else {
+                $txt = "Calma, vamos conferir juntos. Não encontrei sinal de invasão desde ontem: $($ok -join ', ').`nSe o mouse mexer sozinho ou abrirem janelas que você não abriu, use Desconectar da internet no topo do painel e me chame de novo."
+            }
+            return New-RespostaAgente $txt $f 'incidente' '' '' @('Quem entrou no PC hoje?', 'Quais programas estão conectados?', 'Preciso trocar alguma senha?')
+        }
+        'senha' {
+            $l = New-Object System.Collections.Generic.List[string]
+            foreach ($i in @(Get-Quarentena | Where-Object { $_.Tipo -eq 'IP' -and $_.Motivo -match 'BEM-SUCEDIDO' -and $_.Estado -eq 'ISOLADO' })) { if ($i.Motivo -match 'como (\S+)') { $l.Add("A conta $($Matches[1]): alguém entrou nela pela rede vindo da internet ($($i.Alvo)).") } else { $l.Add("Um logon remoto vindo da internet ($($i.Alvo)).") } }
+            foreach ($i in @(Get-Quarentena | Where-Object { $_.Tipo -in 'Proxy', 'Hosts', 'DNS' -and $_.Estado -eq 'ISOLADO' })) { $l.Add("Houve uma tentativa de desviar a sua internet ($($TiposAgente["$($i.Tipo)"])). Se não foi você, troque as senhas dos sites que usou desde $($i.Quando).") }
+            foreach ($x in @($a.alertas | Where-Object { $_.msg -match '^\[Extensao nova\]' -and $_.quando -gt (Get-Date).AddDays(-7).ToString('yyyy-MM-dd') })) { $l.Add("Extensão nova: $($x.titulo). Se você não instalou, remova e troque as senhas dos sites que usou.") }
+            $f = @(Get-Quarentena | Where-Object { $_.Tipo -eq 'IP' -and $_.Motivo -match 'BEM-SUCEDIDO' } | ForEach-Object { @{ tipo = 'análise'; id = "#$($_.Id)" } })
+            if (-not $l.Count) { return New-RespostaAgente 'Pelo que o WebGuardian registrou, não. Ninguém entrou pela rede, não houve desvio de internet nem extensão nova suspeita. Trocar senhas de vez em quando continua sendo uma boa ideia.' @() 'senha' }
+            return New-RespostaAgente "Sim, recomendo trocar, usando outro aparelho (celular, por exemplo):`n$(@($l | ForEach-Object { "• $_" }) -join "`n")" $f 'senha'
+        }
+        'entradas' {
+            $lim = if ($Detalhe) { 40 } else { 12 }
+            $todas = @(Get-LinhasLogPeriodo $per | Where-Object { $_ -match '\[Entrada\]' })
+            if ($null -ne $Ent.hora) { $hh = '{0:D2}' -f $Ent.hora; $todas = @($todas | Where-Object { $_.Substring(11, 2) -eq $hh }); $rot = "$rot, entre ${hh}:00 e ${hh}:59," }
+            if (-not $todas.Count) { return New-RespostaAgente "$rot o WebGuardian não registrou nenhuma entrada no Windows." @() 'entradas' '' '' @() $per }
+            $l = @($todas | Select-Object -Last $lim | ForEach-Object { Format-LinhaLogAgente $_ ($per -eq 'semana') })
+            $erradas = @($todas | Where-Object { $_ -match 'Senha errada' }).Count
+            $txt = "Entradas no Windows ($($rot.TrimEnd(',').ToLower())):`n$($l -join "`n")"
+            if ($todas.Count -gt $lim) { $txt += "`n(mostrei as últimas $lim de $($todas.Count); peça mais detalhes para ver mais)" }
+            if ($erradas) { $txt += "`n$erradas delas com senha errada." }
+            $sug = @(); if (-not $per -or $per -eq 'hoje') { $sug = @('E ontem?') }
+            return New-RespostaAgente $txt @() 'entradas' '' '' $sug $per
+        }
+        'decisoes' {
+            $p = @($a.analises | Where-Object { $_.estado -eq 'pendente' })
+            if (-not $p.Count) { return New-RespostaAgente 'Nada esperando a sua decisão agora.' @() 'decisoes' }
+            $l = @($p | ForEach-Object { "• #$($_.itemId) $($_.titulo) ($($_.alvo)): recomendo $(@{ apagar = 'apagar'; liberar = 'liberar'; manter = 'manter isolado' }[$_.recomendacao]), $($_.confianca)% de confiança." })
+            $ref = ''; $of = ''; $txt = "Esperando você na aba Decisões:`n$($l -join "`n")"
+            if ($p.Count -eq 1) { $ref = "item:$($p[0].itemId)"; $of = 'detalhe'; $txt += "`nQuer que eu explique esse item?" }
+            return New-RespostaAgente $txt @($p | ForEach-Object { @{ tipo = 'análise'; id = "#$($_.itemId)" } }) 'decisoes' $ref $of @(if ($p.Count -eq 1) { 'Sim' })
+        }
+        'acoes' {
+            $x = @($a.acoes)
+            if ($per) { $ini = switch ($per) { 'ontem' { (Get-Date).AddDays(-1).ToString('yyyy-MM-dd') } 'semana' { (Get-Date).AddDays(-6).ToString('yyyy-MM-dd') } default { (Get-Date).ToString('yyyy-MM-dd') } }
+                        $x = @($x | Where-Object { "$($_.quando)".Substring(0, 10) -ge $ini -and ($per -ne 'ontem' -or "$($_.quando)".Substring(0, 10) -eq $ini) }) }
+            $x = @($x | Select-Object -Last $(if ($Detalhe) { 30 } else { 8 }))
+            if (-not $x.Count) { return New-RespostaAgente $(if ($per) { "$rot eu não precisei agir sozinho." } else { 'Ainda não precisei agir sozinho.' }) @() 'acoes' '' '' @() $per }
+            $ref = ''; if ($x.Count -eq 1) { $ref = "acao:$($x[0].id)" }
+            return New-RespostaAgente "O que eu fiz sozinho:`n$(@($x | ForEach-Object { "• $("$($_.quando)".Substring(5, 11)) $($_.acao) ($($_.alvo)): $($_.motivo) [$($_.estado)]" }) -join "`n")`nAs que ainda estão ativas podem ser desfeitas em Agente IA > Ações automáticas." @($x | ForEach-Object { @{ tipo = 'ação'; id = $_.id } }) 'acoes' $ref '' @() $per
+        }
+        'hoje' {
+            if ((-not $per -or $per -eq 'hoje') -and $null -eq $Ent.hora -and -not $Detalhe) {
+                $r = @($a.relatorios | Where-Object { $_.data -eq (Get-Date -Format 'yyyy-MM-dd') }) | Select-Object -Last 1
+                if (-not $r) { $r = New-RelatorioAgente }
+                return New-RespostaAgente "$($r.resumo)`n$(@($r.destaques | ForEach-Object { "• $_" }) -join "`n")" @(@{ tipo = 'relatório'; id = $r.id }) 'hoje' '' 'detalhe' @('Mais detalhes', 'E ontem?') 'hoje'
+            }
+            $linhas = @(Get-LinhasLogPeriodo $per)
+            if ($null -ne $Ent.hora) { $hh = '{0:D2}' -f $Ent.hora; $linhas = @($linhas | Where-Object { $_.Substring(11, 2) -eq $hh }); $rot = "$rot, entre ${hh}:00 e ${hh}:59," }
+            if (-not $linhas.Count) { return New-RespostaAgente "$rot o WebGuardian não registrou nada." @() 'hoje' '' '' @() $per }
+            $al = @($linhas | Where-Object { $_ -match '^\S+ \S+ \[(ALERTA|CRITICO|ISOLADO)\] ' -and $_ -notmatch '\[Agente\]' })
+            $en = @($linhas | Where-Object { $_ -match '\[Entrada\]' }).Count
+            $txt = "$rot o WebGuardian registrou $($linhas.Count) evento(s): $($al.Count) alerta(s) ou item(ns) isolado(s) e $en entrada(s) no Windows."
+            $lim = if ($Detalhe) { 20 } else { 6 }
+            if ($al.Count) { $txt += "`n" + (@($al | Select-Object -Last $lim | ForEach-Object { Format-LinhaLogAgente $_ ($per -eq 'semana') }) -join "`n") }
+            if ($al.Count -gt $lim) { $txt += "`n(e mais $($al.Count - $lim) antes desses)" }
+            $f = @(); if ($per -eq 'ontem') { $ro = @($a.relatorios | Where-Object { $_.data -eq (Get-Date).AddDays(-1).ToString('yyyy-MM-dd') }) | Select-Object -Last 1; if ($ro) { $f = @(@{ tipo = 'relatório'; id = $ro.id }) } }
+            return New-RespostaAgente $txt $f 'hoje' '' '' @() $per
+        }
+        'ultimo_alerta' {
+            $u = @($a.alertas) | Select-Object -Last 1
+            if (-not $u) { return New-RespostaAgente 'Ainda não vi nenhum alerta do WebGuardian.' @() 'ultimo_alerta' }
+            $r = Get-RespostaAlertaAgente "$($u.quando)" $(if ($Detalhe) { 'detalhe' } else { 'resumo' })
+            if ($r.sugestoes.Count) { $r.resposta += "`nFoi você?" }
+            return $r
+        }
+        'conexoes' {
+            $cx = @(); try { $cx = Get-Cacheado 'conexoes' 8 { Get-ConexoesExternas }; $cx = @($cx | Where-Object { $_ -and $_.pid }) } catch { }
+            if (-not $cx.Count) { return New-RespostaAgente 'Nenhum programa conectado à internet agora.' @() 'conexoes' }
+            $s = @($cx | Where-Object { $_.suspeito })
+            $lim = if ($Detalhe) { 40 } else { 8 }
+            $l = @($cx | Select-Object -First $lim | ForEach-Object { "• $($_.nome)$(if ($_.suspeito) { ' (SUSPEITO)' }): $($_.destinos)" })
+            $abre = "$($cx.Count) programa(s) conectado(s) à internet agora"; if ($s.Count) { $abre += ", $($s.Count) suspeito(s)" } else { $abre += ', nenhum suspeito' }
+            $txt = "${abre}:`n$($l -join "`n")"; if ($cx.Count -gt $lim) { $txt += "`n(e mais $($cx.Count - $lim))" }
+            $ref = ''; if ($s.Count -eq 1) { $ref = "programa:$("$($s[0].nome)".ToLower())" }
+            return New-RespostaAgente $txt @() 'conexoes' $ref '' @(if ($cx.Count -gt $lim) { 'Mostra todos' })
+        }
+        'antivirus' {
+            $d = Get-Cacheado 'defender' 20 { Get-EstadoDefender }
+            if ($d.outro -and $d.outro.ligado -and -not $d.ok) { return New-RespostaAgente "Quem protege o PC é o $($d.outro.nome)$(if (-not $d.outro.emDia) { ', mas a base dele está desatualizada' }). O Defender fica desligado quando outro antivírus está ligado, o que é normal." @() 'antivirus' }
+            if ($d.ok) { return New-RespostaAgente "O Defender está ligado. Base de vírus atualizada em $($d.assinaturas); última verificação rápida: $(if ($d.ultimaRapida) { $d.ultimaRapida } else { 'nunca' })." @() 'antivirus' }
+            return New-RespostaAgente 'O antivírus está DESLIGADO. Religue em Segurança do Windows > Proteção contra vírus e ameaças.' @() 'antivirus'
+        }
+        'bloqueios' {
+            $ips = @(Get-Quarentena | Where-Object { $_.Tipo -eq 'IP' -and $_.Estado -eq 'ISOLADO' })
+            if (-not $ips.Count) { return New-RespostaAgente 'Nenhum endereço bloqueado esperando decisão.' @() 'bloqueios' }
+            $ref = ''; if ($ips.Count -eq 1) { $ref = "item:$($ips[0].Id)" }
+            return New-RespostaAgente "Endereços bloqueados:`n$(@($ips | ForEach-Object { "• $($_.Alvo): $($_.Motivo)" }) -join "`n")" @($ips | ForEach-Object { @{ tipo = 'análise'; id = "#$($_.Id)" } }) 'bloqueios' $ref
+        }
+        'dispositivos' {
+            $nomes = @{ Keyboard = 'Teclado'; DiskDrive = 'Pendrive ou HD'; WPD = 'Celular ou portátil'; Net = 'Placa de rede USB' }
+            $d = @(Get-DispositivosVigiados)
+            $l = @($d | ForEach-Object { "• $($nomes[$_.Classe]): $($_.Nome)" })
+            $txt = if ($l.Count) { "Ligados agora:`n$($l -join "`n")" } else { 'Nenhum teclado, pendrive, celular ou placa de rede USB ligado agora.' }
+            $lim = (Get-Date).AddDays(-7).ToString('yyyy-MM-dd')
+            $u = @($a.alertas | Where-Object { "$($_.msg)" -match '^\[USB\]' -and "$($_.quando)" -ge $lim })
+            $ref = ''
+            if ($u.Count) { $x = $u[-1]; $txt += "`nÚltimo aviso de USB: $("$($x.quando)".Substring(8, 2))/$("$($x.quando)".Substring(5, 2)) às $("$($x.quando)".Substring(11, 5)), $($x.titulo). $($x.explicacao)"; $ref = "alerta:$($x.quando)" }
+            $txt += "`nO mesmo teclado ligado em outra porta USB é reconhecido pelo modelo e não vira mais alerta crítico."
+            return New-RespostaAgente $txt @() 'dispositivos' $ref '' @(if ($ref) { 'Fui eu'; 'Não fui eu' })
+        }
+        'rede' {
+            if (Test-Path $ArqRede) {
+                $x = @($a.acoes | Where-Object { $_.tipo -eq 'rede' -and $_.estado -eq 'ativa' }) | Select-Object -Last 1
+                $porque = if ($x) { "Eu desconectei às $("$($x.quando)".Substring(11, 5)): $($x.motivo)" } else { 'Ela foi desconectada pelo painel (botão Desconectar da internet).' }
+                return New-RespostaAgente "O PC está desconectado da internet de propósito. $porque`nQuando for seguro, reconecte pelo botão Reconectar no topo do painel (o Windows pede a sua confirmação)." @() 'rede'
+            }
+            return New-RespostaAgente 'O WebGuardian não desconectou a internet. Se ela caiu, confira o Wi-Fi ou o cabo e reinicie o roteador.' @() 'rede'
+        }
+        'controle' {
+            $nm = @{ sugere = '"Só sugere"'; emergencia = '"Age em emergência"'; automatico = '"Automático"' }[$a.modo]
+            $txt = "Estou no modo $nm$(if ($a.pausado) { ' e PAUSADO' }). Para mudar, use Agente IA > Autonomia; pausar e desligar regras pedem a confirmação do Windows, por isso não faço isso pela conversa."
+            return New-RespostaAgente $txt @() 'controle'
+        }
+        'ajuda' { return New-RespostaAgente "Posso ajudar com: se está tudo bem, o que aconteceu hoje, ontem ou na semana (ou numa hora: ""o que houve às 14h?""), decisões pendentes, se você precisa trocar alguma senha, quem entrou no PC, programas conectados, um programa ou IP específico (""o anydesk está aberto?""), antivírus, IPs bloqueados, dispositivos USB, o que eu fiz sozinho e o que significa um termo (ex.: ""o que é proxy?"").`nEntendo erros de digitação e perguntas de seguimento (""e ontem?"", ""por quê?"", ""fui eu""). Eu funciono só neste PC, por regras, sem internet." @() 'ajuda' '' '' @('Está tudo bem?', 'O que aconteceu hoje?', 'Fui invadido?') }
+    }
+    return $null
+}
+
+function Invoke-ChatAgente([string]$Mensagem, [string]$Contexto, $Anterior = $null) {
+    $a = Get-Agente
+    $m = "$Mensagem"; if ($m.Length -gt 500) { $m = $m.Substring(0, 500) }
+    $t = ConvertTo-TextoAgente $m
+    $pal = @($t.Trim() -split ' ' | Where-Object { $_ })
+    $curta = $pal.Count -le 5
+    # O que veio da resposta anterior: só valores conhecidos
+    $ant = @{ intencao = ''; ref = ''; oferta = ''; periodo = '' }
+    if ($Anterior) {
+        if ($IntencoesAgente.Contains("$($Anterior.intencao)") -or "$($Anterior.intencao)" -in 'item', 'alerta', 'programa', 'ip') { $ant.intencao = "$($Anterior.intencao)" }
+        if ("$($Anterior.ref)" -match '^(item:\d{1,6}|alerta:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d|ip:\d{1,3}(\.\d{1,3}){3}|acao:x\d{1,6}|programa:[a-z0-9][\w\.\-]{0,59})$') { $ant.ref = "$($Anterior.ref)" }
+        if ($IntencoesAgente.Contains("$($Anterior.oferta)")) { $ant.oferta = "$($Anterior.oferta)" }
+        if ("$($Anterior.periodo)" -in 'hoje', 'ontem', 'semana') { $ant.periodo = "$($Anterior.periodo)" }
+    }
+    $ent = Get-EntidadesAgente $t $m
+    $pts = Get-PontosAgente $t
+    $top = Get-MelhorAgente $pts $true
+    $conv = Get-MelhorAgente $pts $false
+    # Item marcado no painel ("Perguntar ao agente"), item citado (#12) ou o que a conversa vinha falando
+    $ctxRef = ''
+    if ($Contexto) { $an = @($a.analises | Where-Object { $_.id -eq $Contexto }) | Select-Object -First 1; if ($an) { $ctxRef = "item:$($an.itemId)" } }
+    $ref = ''
+    if ($ent.item) { $ref = "item:$($ent.item)" } elseif ($ent.ip -and -not $ctxRef) { $ref = "ip:$($ent.ip)" } elseif ($ctxRef) { $ref = $ctxRef }
+    elseif ($ant.ref -and ($ent.pronome -or $curta)) { $ref = $ant.ref }
+    $detalhe = [bool]($pts['detalhe'] -ge 3)
+    $prefixo = ''; if ($pts['saudacao'] -and $top.pontos -ge 2) { $h = (Get-Date).Hour; $prefixo = $(if ($h -lt 12) { 'Bom dia! ' } elseif ($h -lt 18) { 'Boa tarde! ' } else { 'Boa noite! ' }) }
+    $sobreRef = {
+        param($Modo)
+        if ($ref -match '^item:(\d+)$') { return Get-RespostaItemAgente $Matches[1] $Modo }
+        if ($ref -match '^alerta:(.+)$') { return Get-RespostaAlertaAgente $Matches[1] $Modo }
+        if ($ref -match '^programa:(.+)$') { return Get-RespostaProgramaAgente $Matches[1] }
+        if ($ref -match '^ip:(.+)$') { return Get-RespostaIpAgente $Matches[1] }
+        if ($ref -match '^acao:(.+)$') { $x = @($a.acoes | Where-Object { $_.id -eq $Matches[1] }) | Select-Object -Last 1
+            if ($x) { return New-RespostaAgente "Às $("$($x.quando)".Substring(11, 5)) eu fiz: $($x.acao) ($($x.alvo)). Motivo: $($x.motivo). Estado: $($x.estado)$(if ($x.estado -eq 'ativa' -and $x.reversivel) { '; dá para desfazer em Agente IA > Ações automáticas' })." @(@{ tipo = 'ação'; id = $x.id }) 'acoes' $ref } }
+        return $null
+    }
+
+    # 1. "Sim"/"não" respondendo a uma oferta minha
+    if ($curta -and $top.pontos -lt 3 -and $ant.oferta -and $conv.intencao -in 'sim', 'nao') {
+        if ($conv.intencao -eq 'nao') { return New-RespostaAgente 'Tudo bem. Se precisar, é só perguntar.' }
+        if ($ant.oferta -eq 'detalhe' -and $ant.ref) { $ref = $ant.ref; $r = & $sobreRef 'detalhe'; if ($r) { return $r } }
+        if ($ant.oferta -eq 'detalhe' -and $ant.intencao) { $e2 = $ent.Clone(); if (-not $e2.periodo) { $e2.periodo = $ant.periodo }; $r = Get-RespostaIntencaoAgente $ant.intencao $e2 $ant.ref $true; if ($r) { return $r } }
+        $r = Get-RespostaIntencaoAgente $ant.oferta $ent $ant.ref $false; if ($r) { return $r }
+    }
+    # 2. Termo do glossário ("o que é proxy?") ou programa conhecido ("o que é anydesk?")
+    $alvoTermo = ''
+    if ($ent.termo) { $alvoTermo = " $($ent.termo) " } elseif (-not $ref -and $t -match ' (explica|explique|me explica|e perigoso|e seguro) ') { $alvoTermo = $t }
+    if ($alvoTermo) {
+        foreach ($k in $GlossarioAgente.Keys) { if ($alvoTermo -match " ($k)") { return New-RespostaAgente $GlossarioAgente[$k] @() 'glossario' } }
+        foreach ($k in $ProgramasAgente.Keys) { $mk = [regex]::Match($alvoTermo, " ($k)\b"); if ($mk.Success) { return Get-RespostaProgramaAgente $mk.Groups[1].Value } }
+    }
+    # 3. Reação ao assunto anterior ou ao item marcado: fui eu / não fui eu / liberar / apagar / por quê / detalhes
+    $reacao = $null
+    foreach ($k in 'nao_fui_eu', 'fui_eu', 'liberar', 'apagar', 'porque', 'detalhe') { if ($pts[$k] -ge 4 -and $pts[$k] -ge $top.pontos) { $reacao = $k; break } }
+    if ($reacao) {
+        if (-not $ref -and $reacao -in 'fui_eu', 'nao_fui_eu') {
+            # Sem item na conversa: o aviso mais recente (das últimas 6 horas), do assunto citado se houver
+            $lim = (Get-Date).AddHours(-6).ToString('yyyy-MM-dd HH:mm:ss')
+            $cand = @($a.alertas | Where-Object { "$($_.quando)" -ge $lim -and $_.veredito -ne 'info' })
+            if ($top.intencao -eq 'dispositivos') { $c2 = @($cand | Where-Object { "$($_.msg)" -match '^\[USB\]' }); if ($c2.Count) { $cand = $c2 } }
+            elseif ($top.intencao -eq 'entradas') { $c2 = @($cand | Where-Object { "$($_.msg)" -match '\[Entrada\]|BEM-SUCEDIDO' }); if ($c2.Count) { $cand = $c2 } }
+            if ($cand.Count) { $ref = "alerta:$($cand[-1].quando)" }
+            else { $p = @($a.analises | Where-Object { $_.estado -eq 'pendente' }); if ($p.Count -eq 1) { $ref = "item:$($p[0].itemId)" } }
+        }
+        if (-not $ref -and $reacao -in 'liberar', 'apagar') { $p = @($a.analises | Where-Object { $_.estado -eq 'pendente' }); if ($p.Count -eq 1) { $ref = "item:$($p[0].itemId)" } }
+        if ($ref) { $modo = $reacao; if ($reacao -eq 'detalhe') { $modo = 'detalhe' }; $r = & $sobreRef $modo; if ($r) { $r.resposta = $prefixo + $r.resposta; return $r } }
+        if ($reacao -in 'detalhe', 'porque' -and $ant.intencao -and $IntencoesAgente.Contains($ant.intencao) -and $top.pontos -lt 3) {
+            $e2 = $ent.Clone(); if (-not $e2.periodo) { $e2.periodo = $ant.periodo }
+            $r = Get-RespostaIntencaoAgente $ant.intencao $e2 '' $true; if ($r) { return $r }
+        }
+        if ($top.pontos -lt 3) {
+            $p = @($a.analises | Where-Object { $_.estado -eq 'pendente' })
+            $txt = switch ($reacao) {
+                { $_ -in 'liberar', 'apagar' } { if ($p.Count) { "Qual item? Diga o número (ex.: ""#$($p[0].itemId)"") ou use ""Perguntar ao agente"" no item em Decisões. Pendentes: $(@($p | ForEach-Object { "#$($_.itemId) $($_.titulo)" }) -join '; ')." } else { 'Não há nada isolado esperando decisão agora.' } }
+                { $_ -in 'fui_eu', 'nao_fui_eu' } { 'Não achei nenhum aviso recente para ligar a isso. Diga do que se trata (ex.: "o teclado", "#3") ou pergunte "qual foi o último aviso?".' }
+                default { 'Sobre o quê? Diga o número do item (ex.: "#3"), o nome do programa, ou use "Perguntar ao agente" no item em Decisões.' }
+            }
+            return New-RespostaAgente $txt @() '' '' '' @('Qual foi o último aviso?', 'Tem decisão pendente?')
+        }
+    }
+    # 4. Mais de uma pergunta na mesma mensagem ("está tudo bem? e o antivírus?")
+    $vistos = New-Object System.Collections.Generic.List[string]
+    foreach ($cl in ($m -split '[\?\!\.;\r\n]+|\s+e\s+|\s+tamb[eé]m\s+|\s+al[eé]m disso\s+')) {
+        if (-not "$cl".Trim()) { continue }
+        $b = Get-MelhorAgente (Get-PontosAgente (ConvertTo-TextoAgente $cl)) $true
+        if ($b.pontos -ge 3 -and -not $vistos.Contains($b.intencao)) { $vistos.Add($b.intencao) }
+    }
+    if ($vistos.Count -ge 2) {
+        $partes = @($vistos | Select-Object -First 3 | ForEach-Object { Get-RespostaIntencaoAgente $_ $ent '' $detalhe } | Where-Object { $_ })
+        if ($partes.Count -ge 2) {
+            $u = $partes[-1]
+            return @{ resposta = $prefixo + (@($partes | ForEach-Object { $_.resposta }) -join "`n`n"); fontes = @($partes | ForEach-Object { $_.fontes } | Where-Object { $_ })
+                      sugestoes = @($u.sugestoes); anterior = $u.anterior }
+        }
+    }
+    # 5. Pergunta sobre o item marcado/citado sem assunto novo ("me explica", "#3", "e esse?")
+    if ($ref -and $top.pontos -lt 3 -and ($ctxRef -or $ent.item -or $ent.ip -or $ent.pronome -or $curta)) { $r = & $sobreRef 'resumo'; if ($r) { return $r } }
+    # 6. Pergunta de seguimento ("e ontem?", "e às 14h?"): repete o assunto anterior com o que mudou
+    if ($top.pontos -lt 3 -and $ant.intencao -and $IntencoesAgente.Contains($ant.intencao) -and ($ent.seguimento -or $curta) -and ($ent.periodo -or $null -ne $ent.hora -or $ent.seguimento)) {
+        $e2 = $ent.Clone(); if (-not $e2.periodo) { $e2.periodo = $ant.periodo }
+        $r = Get-RespostaIntencaoAgente $ant.intencao $e2 '' $detalhe; if ($r) { return $r }
+    }
+    # 7. Programa citado pelo nome ("o anydesk está aberto?", "o chrome tá conectado?")
+    if ($top.pontos -lt 4 -or $top.intencao -eq 'conexoes') {
+        $prog = Find-ProgramaAgente $t ($top.intencao -eq 'conexoes' -or $top.pontos -lt 2)
+        if ($prog) { $r = Get-RespostaProgramaAgente $prog; $r.resposta = $prefixo + $r.resposta; return $r }
+    }
+    if ($ent.ip -and $top.pontos -lt 4) { $r = Get-RespostaIpAgente $ent.ip; $r.resposta = $prefixo + $r.resposta; return $r }
+    # 8. O assunto principal da mensagem
+    if ($top.pontos -ge 2) {
+        $r = Get-RespostaIntencaoAgente $top.intencao $ent $ref $detalhe
+        if ($r) { $r.resposta = $prefixo + $r.resposta; return $r }
+    }
+    # 9. Só conversa: oi, obrigado
+    if ($conv.intencao -eq 'saudacao') { return Get-RespostaIntencaoAgente 'saudacao' $ent '' $false }
+    if ($conv.intencao -eq 'agradece') { return New-RespostaAgente 'De nada! Se aparecer qualquer aviso, é só me perguntar.' }
+    if ($ent.pronome -and $curta) { return Get-RespostaIntencaoAgente 'ultimo_alerta' $ent '' $detalhe }   # "o que é isso?" sem item na conversa: o último aviso
+    if ($ent.termo) {
+        return New-RespostaAgente "Ainda não sei explicar ""$($ent.termo)"". Sei explicar: isolar, liberar, apagar, assinatura digital, proxy, hosts, DNS, acesso remoto, força bruta, confiança, firewall, alarme falso, extensão e programas comuns (ex.: ""o que é anydesk?"")." @() 'glossario'
+    }
+    # 10. Não entendi: se algo chegou perto, pergunto se é isso
+    if ($top.intencao) {
+        return New-RespostaAgente "Não tenho certeza do que você quer saber. É sobre $($AssuntoIntencao[$top.intencao])?" @() '' '' $top.intencao @('Sim', $PerguntaIntencao[$top.intencao])
+    }
+    return New-RespostaAgente "Posso ajudar com: se está tudo bem, o que aconteceu hoje, decisões pendentes, se você precisa trocar alguma senha, quem entrou no PC, programas conectados, antivírus, IPs bloqueados, o que eu fiz sozinho e o que significa um termo (ex.: ""o que é proxy?""). Em Decisões, o botão ""Perguntar ao agente"" me pergunta sobre um item específico.`nEu funciono só neste PC, por regras, sem internet." @() '' '' '' @('Está tudo bem?', 'O que aconteceu hoje?', 'O que você sabe fazer?')
+}
+
 # ================================ PAINEL HTML ================================
 function Format-Data($d) { if ($d) { try { return ([datetime]$d).ToString('dd/MM/yyyy HH:mm') } catch { } }; return '' }
 
@@ -2095,6 +3175,7 @@ function Get-EstadoPainel {
                           @{ id = $_.Id; tipo = "$($_.Tipo)"; alvo = "$($_.Alvo)"; motivo = "$($_.Motivo)"; quando = "$($_.Quando)"; estado = "$($_.Estado)" } })
         log         = $log
         conexoes    = @($conexoes)
+        agente      = $(try { Get-EstadoAgente } catch { $null })
     }
 }
 
@@ -2272,9 +3353,9 @@ function Invoke-PedidoPainel($ctx) {
             if ($req.ContentLength64 -lt 0 -or $req.ContentLength64 -gt 4096) { Send-Resposta $ctx 413 'text/plain' 'Pedido grande demais'; return }
             $leitor = New-Object IO.StreamReader($req.InputStream, [Text.Encoding]::UTF8)
             $corpo = $leitor.ReadToEnd() | ConvertFrom-Json
-            $id = "$($corpo.id)"; $acaoPedida = "$($corpo.acao)"
+            $id = "$($corpo.id)"; $acaoPedida = "$($corpo.acao)"; $valor = $corpo.valor
             # Ações sensíveis só acontecem depois da confirmação na janela do Windows aberta pelo monitor
-            $textoConf = Get-TextoConfirmacao $acaoPedida $id
+            $textoConf = Get-TextoConfirmacao $acaoPedida $id $valor
             if ($textoConf -and -not (Confirm-NoWindows 'Confirme no WebGuardian' $textoConf)) {
                 Write-Log 'ALERTA' "Acao '$acaoPedida' ($id) pedida pelo painel NAO confirmada na janela do Windows"
                 Send-Resposta $ctx 200 'application/json; charset=utf-8' (ConvertTo-Json -InputObject @{ mensagem = 'Cancelado: a acao nao foi confirmada na janela do Windows.' } -Compress); return
@@ -2309,9 +3390,17 @@ function Invoke-PedidoPainel($ctx) {
                 'scanOffline'     { Write-Log 'INFO' 'Verificacao OFFLINE solicitada - reiniciando'; Start-MpWDOScan; 'O computador vai reiniciar para a verificacao offline.' }
                 'iniciarMonitor'  { Start-ScheduledTask -TaskName $NomeTarefa -ErrorAction SilentlyContinue; 'Monitor iniciado.' }
                 'limparHistorico' { $Q = @(Get-Quarentena | Where-Object Estado -eq 'ISOLADO'); Save-Quarentena $Q; 'Historico limpo (itens pendentes mantidos).' }
+                { $_ -like 'agente*' } { Invoke-AcaoAgente $acaoPedida $id $valor }
                 default           { 'Acao desconhecida.' }
             }
             Send-Resposta $ctx 200 'application/json; charset=utf-8' (ConvertTo-Json -InputObject @{ mensagem = "$msg" } -Compress); return
+        }
+        if ($caminho -eq '/api/agente/chat' -and $req.HttpMethod -eq 'POST') {
+            if ($req.ContentLength64 -lt 0 -or $req.ContentLength64 -gt 4096) { Send-Resposta $ctx 413 'text/plain' 'Pedido grande demais'; return }
+            $leitor = New-Object IO.StreamReader($req.InputStream, [Text.Encoding]::UTF8)
+            $corpo = $leitor.ReadToEnd() | ConvertFrom-Json
+            $r = Invoke-ChatAgente "$($corpo.mensagem)" "$($corpo.contexto)" $corpo.anterior
+            Send-Resposta $ctx 200 'application/json; charset=utf-8' (ConvertTo-Json -InputObject $r -Depth 4 -Compress); return
         }
         Send-Resposta $ctx 404 'text/plain' 'Nao encontrado'
     } catch {
@@ -2433,6 +3522,17 @@ function Set-AtalhosApp([string]$Exe, [string]$Nome) {
 }
 function Remove-AtalhosApp([string]$Arquivo) {
     foreach ($dir in [Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs')) { Remove-Item (Join-Path $dir $Arquivo) -ErrorAction SilentlyContinue }
+}
+
+function New-AcaoMonitor([string]$Destino, [switch]$Simples) {
+    # Bug B1: o powershell.exe é programa de console, e a janela preta piscava ao ligar o PC antes do -WindowStyle Hidden.
+    # O conhost.exe --headless (Windows 10 1809 ou mais novo) abre o console sem janela nenhuma.
+    $args0 = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Destino`" -Monitorar"
+    $conhost = Join-Path $env:windir 'System32\conhost.exe'
+    if (-not $Simples -and [Environment]::OSVersion.Version.Build -ge 17763 -and (Test-Path -LiteralPath $conhost)) {
+        return New-ScheduledTaskAction -Execute $conhost -Argument "--headless powershell.exe $args0"
+    }
+    return New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $args0
 }
 
 function Install-App([string]$Origem) {
@@ -2569,7 +3669,7 @@ switch ($PSCmdlet.ParameterSetName) {
         auditpol /set /subcategory:"{0CCE9215-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable | Out-Null  # Logon
         auditpol /set /subcategory:"{0CCE9235-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable | Out-Null  # Contas de usuario
         auditpol /set /subcategory:"{0CCE9237-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable | Out-Null  # Grupos de seguranca
-        $acao = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$destino`" -Monitorar"
+        $acao = New-AcaoMonitor $destino
         $gat  = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
         $prin = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Highest
         $conf = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
@@ -2697,6 +3797,8 @@ switch ($PSCmdlet.ParameterSetName) {
         Copy-AssinaturaInstalada $DirScript
         $temApp = Install-App $DirScript
         if ($temApp) { Write-Host 'App WebGuardian.exe instalado (Menu Iniciar e Area de Trabalho)' }
+        # 2.1 (bug B1): quem já tinha a tarefa antiga passa a iniciar o monitor sem a janela preta
+        try { Set-ScheduledTask -TaskName $NomeTarefa -Action (New-AcaoMonitor $destino) -ErrorAction Stop | Out-Null } catch { Write-Host "Aviso: nao consegui trocar a forma de iniciar o monitor ($_)." -ForegroundColor Yellow }
         Start-ScheduledTask -TaskName $NomeTarefa
         Write-Host 'Iniciando a versao nova (o painel leva uns 15 s para ficar pronto)' -NoNewline
         $url = $null
@@ -2711,6 +3813,7 @@ switch ($PSCmdlet.ParameterSetName) {
             # 4) a versão nova não subiu: volta a anterior automaticamente
             Write-Host 'A versao nova nao respondeu em 90 s. Voltando para a versao anterior...' -ForegroundColor Red
             Stop-ScheduledTask -TaskName $NomeTarefa -ErrorAction SilentlyContinue
+            try { Set-ScheduledTask -TaskName $NomeTarefa -Action (New-AcaoMonitor $destino -Simples) -ErrorAction Stop | Out-Null } catch { }   # a forma antiga de iniciar, que toda versão entende
             Copy-Item (Join-Path $bk 'Guardiao.ps1') $destino -Force
             if (Test-Path (Join-Path $bk 'painel.html')) { Copy-Item (Join-Path $bk 'painel.html') $htmlInst -Force }
             Remove-Item $assInst -Recurse -Force -ErrorAction SilentlyContinue
@@ -2801,6 +3904,7 @@ switch ($PSCmdlet.ParameterSetName) {
                 try { Step-AtualizacaoDefender } catch { Write-Log 'INFO' "Erro na atualizacao do Defender: $_" }   # base sempre em dia
                 if ((Get-Date) -ge $script:ProxAutenticidade) { try { Update-Autenticidade } catch { } }   # arquivos instalados intactos?
                 try { Step-VarreduraAutomatica } catch { Write-Log 'INFO' "Erro na verificacao automatica: $_" }   # 1x por dia, sem abrir nada
+                try { Step-Agente } catch { Write-Log 'INFO' "Erro no agente do painel: $_" }   # análises, regras de emergência e relatório do dia
                 $desde = $agora.AddSeconds(-10)   # sobreposicao; duplicados sao ignorados pelo RecordId
                 $ciclo++
                 # Espera atendendo: cliques no icone, atalho, o painel e os downloads

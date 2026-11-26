@@ -8,7 +8,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>WebGuardian</title>
-<meta name="description" content="Painel local do WebGuardian: estado da proteção, itens isolados, atividade e conexões deste PC.">
+<meta name="description" content="Painel local do WebGuardian: estado da proteção, itens isolados, análises do agente de IA, atividade e conexões deste PC.">
 <meta name="theme-color" content="#0b0b0b" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2 4 5.2v6c0 5 3.4 9.3 8 10.8 4.6-1.5 8-5.8 8-10.8v-6L12 2Z' fill='%230f62fe'/%3E%3C/svg%3E">
@@ -391,6 +391,174 @@ td.dim{color:var(--t3)}
   .dls time{min-width:0}
 }
 
+/* ================= Agente de IA: peças próprias (sobre o sistema do Console) ================= */
+.demo{display:none;align-items:center;gap:12px;margin-bottom:16px;padding:12px 16px;border-left:3px solid var(--yel);background:var(--yel-bg);font-size:14px}
+.demo svg.i{width:20px;height:20px;color:var(--yel)}
+.demo code{font-family:var(--mono);font-size:12px}
+.hdr .mode{display:flex;align-items:center;gap:8px;padding:0 16px;border-left:1px solid #262626;font-size:13px;color:#c6c6c6;white-space:nowrap}
+.hdr .mode b{font-weight:600;color:#f4f4f4}
+
+/* diagrama: fontes do Guardian alimentando o agente */
+.hub.agent svg.i{color:var(--link)}
+.node .st.lido{color:var(--t2)}
+
+/* autonomia */
+.auto{padding:16px;display:grid;gap:16px}
+.auto .lvls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--bd-3);border:1px solid var(--bd-3)}
+.auto .lvls button{display:grid;gap:4px;padding:12px;border:0;background:var(--l1);color:var(--t2);font:inherit;text-align:left;cursor:pointer;min-height:76px}
+.auto .lvls button b{font-size:14px;font-weight:600;color:var(--t1)}
+.auto .lvls button small{font-size:12px;color:var(--t3);letter-spacing:.32px;line-height:1.4}
+.auto .lvls button:hover{background:var(--l2)}
+.auto .lvls button[aria-pressed="true"]{background:var(--l3);box-shadow:inset 0 -3px 0 var(--blue)}
+.rules{list-style:none;margin:0;padding:0;border-top:1px solid var(--bd)}
+.rules li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 16px;align-items:center;padding:12px 16px;border-top:1px solid var(--bd)}
+.rules li:first-child{border-top:0}
+.rules b{font-weight:400;font-size:14px} .rules small{grid-column:1;font-size:12px;color:var(--t3);letter-spacing:.32px}
+.rules .tg{grid-row:1/span 2;grid-column:2}
+.rules li.off b{color:var(--t3)}
+/* interruptor (toggle) */
+.tg{position:relative;width:48px;height:24px;border-radius:12px;border:0;background:var(--bd-strong);cursor:pointer;padding:0;transition:background-color 70ms var(--ease)}
+.tg::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform 70ms var(--ease)}
+.tg[aria-checked="true"]{background:var(--grn)} .tg[aria-checked="true"]::after{transform:translateX(24px)}
+@media (prefers-color-scheme: light){ .tg[aria-checked="true"]{background:#24a148} }
+
+/* análise (cartão de veredito) */
+.an{display:grid;grid-template-columns:minmax(0,1fr) 300px;border-top:1px solid var(--bd)}
+.an:first-child{border-top:0}
+.an-main{padding:16px;min-width:0}
+.an-side{padding:16px;border-left:1px solid var(--bd);background:var(--l2);display:flex;flex-direction:column;gap:12px}
+.an-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.an-top .q-id{font:400 12px/1 var(--mono);color:var(--t3)}
+.an-top b{font-size:14px;font-weight:600}
+.an h3{margin:12px 0 0;font-size:16px;font-weight:400;line-height:1.4}
+.an .q-alvo{margin-top:10px}
+.ev{margin:12px 0 0;padding:0;list-style:none;display:grid;gap:6px}
+.ev li{display:grid;grid-template-columns:16px minmax(0,1fr);gap:8px;font-size:13px;color:var(--t2)}
+.ev li svg.i{width:14px;height:14px;margin-top:2px;color:var(--t3)}
+.conf{display:grid;gap:6px}
+.conf .lab{display:flex;justify-content:space-between;font-size:12px;color:var(--t3);letter-spacing:.32px}
+.conf .lab b{font-weight:600;color:var(--t1);font-variant-numeric:tabular-nums}
+.meter{height:6px;background:var(--bd-2)} .meter i{display:block;height:100%;background:var(--t2)}
+.meter.bad i{background:var(--red)} .meter.warn i{background:var(--yel)} .meter.ok i{background:var(--grn)}
+.rec{font-size:13px;color:var(--t2)} .rec b{color:var(--t1);font-weight:600}
+.an-side .btn{width:100%}
+.an-side .alt{display:grid;grid-template-columns:1fr 1fr;gap:1px}
+.an-side .alt .btn{height:32px;font-size:13px;padding:0 12px}
+.an.done{opacity:.62}
+.an.done .an-side .btn{display:none}
+.an.done .an-side .feito{display:block}
+.feito{display:none;font-size:13px;color:var(--t2)}
+
+/* feed de análises (resumo) */
+.vd{list-style:none;margin:0;padding:0}
+.vd li{display:grid;grid-template-columns:52px minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 16px;border-top:1px solid var(--bd)}
+.vd li:first-child{border-top:0}
+.vd li:hover{background:var(--l2)}
+.vd time{font:400 12px/1.4 var(--mono);color:var(--t3)}
+.vd .t{min-width:0} .vd .t b{display:block;font-weight:400;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vd .t small{display:block;font-size:12px;color:var(--t3);letter-spacing:.32px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vd .r{display:flex;align-items:center;gap:12px}
+.vd .pc{font:400 12px/1 var(--mono);color:var(--t3);min-width:36px;text-align:right}
+
+/* ações do agente */
+td .btn{height:32px;padding:0 12px;font-size:13px}
+.st-txt{display:inline-flex;align-items:center;gap:8px}
+
+/* conversa */
+.chat{display:grid;grid-template-rows:minmax(0,1fr) auto;height:calc(100vh - 340px);min-height:440px}
+.msgs{overflow:auto;padding:24px 16px;display:flex;flex-direction:column;gap:20px}
+.msg{display:grid;grid-template-columns:32px minmax(0,1fr);gap:12px;max-width:820px}
+.msg .av{width:32px;height:32px;display:grid;place-items:center;background:var(--l3);color:var(--t2)}
+.msg.ag .av{background:var(--blue);color:#fff}
+.msg .who{font-size:12px;color:var(--t3);letter-spacing:.32px;margin-bottom:4px}
+.msg .who b{color:var(--t1);font-weight:600;margin-right:6px}
+.msg .tx{font-size:14px;line-height:1.6;color:var(--t1);white-space:pre-line}
+.msg.eu{align-self:flex-end;grid-template-columns:minmax(0,1fr) 32px}
+.msg.eu .av{grid-column:2;grid-row:1}
+.msg.eu > div:last-child{grid-column:1;grid-row:1;text-align:right}
+.msg.eu .tx{display:inline-block;text-align:left;background:var(--l3);padding:10px 14px}
+.srcs{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.srcs a{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border:1px solid var(--bd-3);font:400 12px/1 var(--mono);color:var(--t2);text-decoration:none}
+.srcs a:hover{border-color:var(--link);color:var(--link)}
+.sug{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.sug button{height:28px;padding:0 10px;border:1px solid var(--bd-3);background:transparent;color:var(--t2);font:400 12px/1 var(--sans);cursor:pointer}
+.sug button:hover{border-color:var(--link);color:var(--t1)}
+.typing{display:inline-flex;gap:4px} .typing i{width:6px;height:6px;border-radius:50%;background:var(--t3);animation:tp 1s infinite}
+.typing i:nth-child(2){animation-delay:.15s} .typing i:nth-child(3){animation-delay:.3s}
+@keyframes tp{50%{opacity:.25}}
+.compose{border-top:1px solid var(--bd);background:var(--l1)}
+.chips{display:flex;gap:8px;flex-wrap:wrap;padding:12px 16px 0}
+.chips button{height:32px;padding:0 12px;border:1px solid var(--bd-3);background:transparent;color:var(--t2);font:400 13px/1 var(--sans);cursor:pointer}
+.chips button:hover{border-color:var(--link);color:var(--t1)}
+.inrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:1px;padding:12px 16px 16px}
+.inrow textarea{resize:none;height:48px;min-height:48px;max-height:160px;padding:13px 16px;border:0;border-bottom:1px solid var(--bd-strong);background:var(--l2);color:var(--t1);font:400 14px/1.43 var(--sans);letter-spacing:.16px}
+.inrow textarea:focus{outline:2px solid var(--focus);outline-offset:-2px}
+.inrow textarea::placeholder{color:var(--t4)}
+.inrow .btn{height:48px}
+.ctx{display:none;align-items:center;gap:8px;margin:12px 16px 0;padding:6px 10px;background:var(--l3);font-size:12px;color:var(--t2);width:max-content;max-width:calc(100% - 32px)}
+.ctx button{border:0;background:transparent;color:var(--t3);cursor:pointer;font:inherit;padding:0 2px}
+
+/* relatórios */
+.rep{padding:20px 16px}
+.rep .rp-h{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.rep h3{margin:0;font-size:20px;font-weight:400}
+.rep .rp-h span{font-size:12px;color:var(--t3);letter-spacing:.32px}
+.rep p{margin:12px 0 0;color:var(--t2);max-width:80ch;line-height:1.6}
+.rep ul{margin:12px 0 0;padding-left:18px;color:var(--t2);display:grid;gap:4px}
+.rnums{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--bd);border-top:1px solid var(--bd)}
+.rnums div{background:var(--l1);padding:14px 16px}
+.rnums small{display:block;font-size:12px;color:var(--t3);letter-spacing:.32px}
+.rnums b{display:block;margin-top:6px;font-size:24px;font-weight:300;font-variant-numeric:tabular-nums}
+.rlist{list-style:none;margin:0;padding:0}
+.rlist li{border-top:1px solid var(--bd)} .rlist li:first-child{border-top:0}
+.rlist button{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;width:100%;padding:12px 16px;border:0;background:transparent;color:var(--t1);font:inherit;text-align:left;cursor:pointer}
+.rlist button:hover{background:var(--l2)}
+.rlist button[aria-current="true"]{background:var(--l3);box-shadow:inset 3px 0 0 var(--blue)}
+.rlist small{grid-column:1;font-size:12px;color:var(--t3);letter-spacing:.32px}
+.rlist time{grid-row:1/span 2;grid-column:2;align-self:center;font:400 12px/1 var(--mono);color:var(--t3)}
+
+/* configurações */
+.kv dd select{height:32px;padding:0 32px 0 12px;border:0;border-bottom:1px solid var(--bd-strong);background:var(--l2);color:var(--t1);font:400 14px/1 var(--sans)}
+
+@media (max-width:1200px){ .an{grid-template-columns:minmax(0,1fr)} .an-side{border-left:0;border-top:1px solid var(--bd)} }
+@media (max-width:860px){
+  .hdr .mode{display:none}
+  .auto .lvls{grid-template-columns:minmax(0,1fr)}
+  .rnums{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .chat{height:calc(100vh - 300px)}
+  .msg{max-width:none}
+}
+
+/* ================= Agente de IA integrado ao Console ================= */
+.hdr .mode{display:flex;align-items:center;gap:8px;padding:0 16px;border-left:1px solid #262626;font-size:13px;color:#c6c6c6;white-space:nowrap}
+.hdr .mode b{font-weight:600;color:#f4f4f4}
+[hidden]{display:none!important}
+.ag-line{grid-column:2;display:flex;align-items:center;gap:10px;margin-top:14px;padding:10px 12px;background:var(--l2);border-left:2px solid var(--link);color:var(--t2);font-size:13px;text-decoration:none;width:max-content;max-width:100%}
+.ag-line:hover{background:var(--l3);color:var(--t1)}
+.ag-line svg.i{color:var(--link)}
+.ag-line.bad{border-left-color:var(--red)} .ag-line.bad svg.i{color:var(--red)}
+.ag-line.warn{border-left-color:var(--yel)} .ag-line.warn svg.i{color:var(--yel)}
+.ag-subbar{margin-bottom:16px}
+.ag-subbar .seg button{height:40px;padding:0 18px}
+.ag-pane > .g:first-child{margin-top:0}
+/* análise dentro do item da fila */
+.q-ag{margin-top:14px;padding:14px 16px;background:var(--l2);border-left:2px solid var(--link);display:grid;gap:8px}
+.q-ag-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px}
+.q-ag-h svg.i{color:var(--link)} .q-ag-h b{font-weight:600}
+.q-ag-c{font:400 12px/1 var(--mono);color:var(--t3);margin-left:auto}
+.q-ag .meter{height:4px}
+.q-ag-t{margin:2px 0 0;font-size:14px;color:var(--t1);line-height:1.5}
+.q-ag .ev{margin:0}
+.q-acts.com-ag{flex-wrap:wrap;justify-content:flex-end;max-width:420px}
+.q-acts.com-ag .q-time{width:100%;text-align:right;margin:0 0 6px}
+.q-acts.com-ag .btn.ghost{width:100%;justify-content:flex-end}
+@media (max-width:640px){ .ag-line{grid-column:1;width:auto} .q-acts.com-ag{max-width:none;justify-content:stretch} .q-acts.com-ag .q-time{text-align:left} .ag-subbar .seg{display:flex;overflow-x:auto} .ag-subbar .seg button{flex:none} }
+.q-acts.com-ag .rec-ag{box-shadow:0 0 0 2px var(--l1),0 0 0 3px var(--link)}
+.q-acts.com-ag .btn.primary.rec-ag{box-shadow:none}
+.rec-nota{display:flex;align-items:center;gap:6px;width:100%;justify-content:flex-end;margin-top:8px;font-size:12px;color:var(--t3);letter-spacing:.32px}
+.rec-nota svg.i{width:14px;height:14px;color:var(--link)}
+@media (max-width:640px){ .rec-nota{justify-content:flex-start} }
+
 </style>
 </head>
 <body>
@@ -424,6 +592,17 @@ td.dim{color:var(--t3)}
   <symbol id="i-chev" viewBox="0 0 24 24"><path d="m10 7 5 5-5 5"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14"/></symbol>
 </svg>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-agent" viewBox="0 0 24 24"><rect x="5" y="7" width="14" height="11" rx="2"/><path d="M12 3.5V7M9 12h.01M15 12h.01M9.5 15.5h5M3 11v3M21 11v3"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4.5 5.5h15v10h-9l-4.5 3.5v-3.5h-1.5z"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12 20 4l-6 16-2.5-6.5z"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24"><path d="M6.5 3.5h7l4 4v13h-11zM13.5 3.5v4h4M9 12h6M9 15.5h6"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8.5 5.5v13M15.5 5.5v13"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7.5 5v14l11-7z"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8M14 4.5v5M8 14.5v5"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+</svg>
 <a class="skip" href="#conteudo">Pular para o conteúdo</a>
 
 <header class="hdr">
@@ -432,9 +611,11 @@ td.dim{color:var(--t3)}
   <nav class="where" aria-label="Você está em"><span>Camada extra de proteção</span><span>/</span><b id="crumb">Resumo</b></nav>
   <span class="host" id="pc" title="Nome deste computador"></span>
   <div class="end">
+    <span class="mode so-ag" hidden title="Nível de autonomia do agente de IA"><svg class="i"><use href="#i-agent"/></svg>Agente: <b id="h-modo">—</b></span>
     <span class="hbtn live" aria-live="polite"><span class="dot" id="live-dot"></span><span id="live-txt">Conectando</span><time id="live-t"></time></span>
     <a class="hbtn" href="#decisoes" title="Decisões pendentes" aria-label="Decisões pendentes"><svg class="i"><use href="#i-inbox"/></svg><span class="cnt" id="mtab-pend" hidden>0</span></a>
     <button class="hbtn" type="button" id="b-ajuda" title="Atalhos do teclado (?)" aria-label="Atalhos do teclado"><svg class="i"><use href="#i-info"/></svg></button>
+    <button class="hbtn so-ag" type="button" id="b-agpausa" hidden><svg class="i"><use href="#i-pause"/></svg><span class="lbl">Pausar agente</span></button>
     <button class="hbtn danger" id="b-rede" data-acao="isolarRede" title="Desconectar da internet"><svg class="i"><use href="#i-unplug"/></svg><span class="lbl">Desconectar da internet</span></button>
   </div>
 </header>
@@ -446,6 +627,7 @@ td.dim{color:var(--t3)}
   <a href="#conexoes"><svg class="i"><use href="#i-globe"/></svg>Conexões<kbd>4</kbd></a>
   <a href="#defender"><svg class="i"><use href="#i-shield"/></svg>Antivírus<kbd>5</kbd></a>
   <a href="#historico"><svg class="i"><use href="#i-history"/></svg>Histórico<kbd>6</kbd></a>
+  <a href="#agente"><svg class="i"><use href="#i-agent"/></svg>Agente IA<span class="count" id="t-ag" hidden>0</span><kbd>7</kbd></a>
   <span class="fill"></span>
 </nav>
 
@@ -467,6 +649,7 @@ td.dim{color:var(--t3)}
             <div class="p-kicker"><span id="state-badge" class="badge">Verificando</span><span id="state-when"></span></div>
             <h1 id="estado">Lendo o estado deste computador</h1>
             <p id="lead">O WebGuardian é uma camada extra junto ao seu antivírus: vigia logons, programas, serviços e a rede, e isola o que parece invasão até você decidir.</p>
+            <a class="ag-line" id="ag-line" href="#agente" hidden><svg class="i"><use href="#i-agent"/></svg><span id="ag-line-t"></span></a>
           </div>
           <div class="acts">
             <button class="btn primary" id="b-main" data-acao="scanRapido"><svg class="i"><use href="#i-scan"/></svg>Fazer verificação rápida</button>
@@ -615,12 +798,88 @@ td.dim{color:var(--t3)}
       <ul class="dls" id="conf-lista"></ul>
     </section></div>
   </div>
+  <!-- ============================ AGENTE IA ============================ -->
+  <div class="view" id="v-agente" data-aba="agente">
+    <div class="g" id="ag-vazio"><section class="s16">
+      <div class="sec-t"><h2>Agente de IA</h2></div>
+      <div class="calm"><div class="sq" style="background:var(--l3);color:var(--t2)"><svg class="i"><use href="#i-agent"/></svg></div>
+        <div><b>O agente de IA ainda não está ativo nesta versão</b><p>Quando o WebGuardian enviar o campo <code class="mono">agente</code> em <code class="mono">/api/estado</code>, as análises, a conversa, as ações automáticas e os relatórios aparecem aqui. O resto do painel funciona normalmente.</p></div></div>
+    </section></div>
+    <div id="ag-conteudo" hidden>
+      <div class="alert bad" id="ag-pausado" role="status"><svg class="i"><use href="#i-pause"/></svg><span>O agente está pausado. O WebGuardian continua protegendo e isolando normalmente; só as análises e as ações automáticas do agente param.</span></div>
+      <div class="ag-subbar"><div class="seg" role="group" aria-label="Seções do agente" id="ag-sub">
+        <button type="button" data-sub="conversa">Conversa</button>
+        <button type="button" data-sub="acoes">Ações automáticas <span class="n" id="n-agac" hidden>0</span></button>
+        <button type="button" data-sub="relatorios">Relatórios</button>
+        <button type="button" data-sub="autonomia">Autonomia</button>
+      </div></div>
+
+      <div class="ag-pane" data-sub="conversa">
+        <div class="g"><section class="s16" aria-labelledby="h-chat">
+          <div class="sec-t"><h2 id="h-chat">Conversa com o agente</h2><span class="sub">Responde com base nos registros do WebGuardian deste PC</span>
+            <span class="end"><button class="btn ghost" type="button" id="b-limpar-chat">Nova conversa</button></span></div>
+          <div class="chat">
+            <div class="msgs" id="msgs" aria-live="polite"></div>
+            <div class="compose">
+              <div class="ctx" id="ctx"><svg class="i"><use href="#i-agent"/></svg><span id="ctx-txt"></span><button type="button" id="ctx-x" aria-label="Remover contexto">✕</button></div>
+              <div class="chips" id="chips"></div>
+              <form class="inrow" id="f-chat">
+                <label class="hide" for="in-chat">Mensagem para o agente</label>
+                <textarea id="in-chat" rows="1" placeholder="Pergunte sobre um alerta, um programa ou a segurança do PC…"></textarea>
+                <button class="btn primary" type="submit">Enviar<svg class="i"><use href="#i-send"/></svg></button>
+              </form>
+            </div>
+          </div>
+        </section></div>
+      </div>
+
+      <div class="ag-pane" data-sub="acoes" hidden>
+        <div class="g"><section class="s16" aria-labelledby="h-agac">
+          <div class="sec-t"><h2 id="h-agac">Ações que o agente executou sozinho</h2><span class="end sub">Só em emergência, conforme as regras de Autonomia</span></div>
+          <div class="scroll" style="max-height:calc(100vh - 300px)"><table>
+            <colgroup><col style="width:120px"><col style="width:26%"><col><col style="width:120px"><col style="width:130px"></colgroup>
+            <thead><tr><th>Quando</th><th>Ação</th><th>Motivo</th><th>Estado</th><th></th></tr></thead><tbody id="ag-acoes"></tbody></table></div>
+        </section></div>
+      </div>
+
+      <div class="ag-pane" data-sub="relatorios" hidden>
+        <div class="g">
+          <section class="s12" id="ag-rep" aria-label="Relatório"></section>
+          <section class="s4" aria-labelledby="h-rl">
+            <div class="sec-t"><h2 id="h-rl">Relatórios</h2><span class="end"><button class="btn ghost" type="button" id="b-agrel">Gerar agora</button></span></div>
+            <ul class="rlist" id="ag-rlist"></ul>
+          </section>
+        </div>
+      </div>
+
+      <div class="ag-pane" data-sub="autonomia" hidden>
+        <div class="g">
+          <section class="s10" aria-labelledby="h-modo2">
+            <div class="sec-t"><h2 id="h-modo2">Nível de autonomia</h2></div>
+            <div class="auto"><div class="lvls" role="group" aria-label="Nível de autonomia" id="ag-lvls">
+              <button type="button" data-modo="sugere"><b>Só sugere</b><small>Analisa e recomenda. Nada é feito sem você aprovar.</small></button>
+              <button type="button" data-modo="emergencia"><b>Age em emergência</b><small>Em caso crítico executa as regras abaixo e te avisa. O resto, sugere.</small></button>
+              <button type="button" data-modo="automatico"><b>Automático</b><small>Age em emergência com mais firmeza e mantém isolado sozinho o que tem confiança muito alta. Liberar e apagar continuam com você.</small></button>
+            </div></div>
+            <div class="sec-t" style="border-top:1px solid var(--bd)"><h2>Regras de emergência</h2><span class="sub">O que o agente pode fazer sozinho</span></div>
+            <ul class="rules" id="ag-regras"></ul>
+          </section>
+          <section class="s6" aria-labelledby="h-priv">
+            <div class="sec-t"><h2 id="h-priv">Modelo e privacidade</h2></div>
+            <dl class="kv" id="ag-priv"></dl>
+            <p class="note">Toda ação automática fica registrada em "Ações automáticas" e pode ser desfeita. Decisões que apagam algo de vez sempre pedem a sua confirmação.</p>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
 </main>
 
 <footer class="status">
   <span><span class="dot" id="mon-dot"></span><span id="mon-txt">Monitor: verificando</span></span>
+  <span id="ag-status">Agente IA: verificando</span>
   <span><svg class="i"><use href="#i-lock"/></svg>Somente local · 127.0.0.1</span>
-  <span>Abas <kbd>1</kbd>–<kbd>6</kbd> · ajuda <kbd>?</kbd></span>
+  <span>Abas <kbd>1</kbd>–<kbd>7</kbd> · ajuda <kbd>?</kbd></span>
   <span class="r"><span class="selo" id="selo" hidden><svg class="i"><use href="#i-shield-ok"/></svg><span id="selo-txt"></span></span><span id="foot-r"></span></span>
 </footer>
 
@@ -853,7 +1112,7 @@ function renderFila(pend) {
     bl.onclick = async () => { if (await confirmar('Liberar este item?', it.alvo, (LIBERAR[it.tipo] || 'Desfaz o isolamento.') + ' Depois, confirme na janela do Windows que vai aparecer.', 'Liberar item', false, 'i-undo')) executar('liberar', it.id, bl); };
     const ba = el('button','btn danger'); ba.append(icon('i-trash'), 'Apagar ameaça');
     ba.onclick = async () => { if (await confirmar('Apagar esta ameaça?', it.alvo, (APAGAR[it.tipo] || '') + ' Não dá para desfazer.', 'Apagar ameaça', true, 'i-trash')) executar('apagar', it.id, ba); };
-    acts.append(tm, bl, ba); row.append(piw, body, acts); f.append(row);
+    acts.append(tm, bl, ba); row.append(piw, body, acts); row.dataset.id = it.id; f.append(row);
   }
 }
 
@@ -1106,7 +1365,7 @@ function setFiltro(f) { filtro = f; $('f-todas').setAttribute('aria-pressed', f 
 $('f-todas').onclick = () => setFiltro('todas'); $('f-susp').onclick = () => setFiltro('susp');
 
 // ---------------- Abas: cada seção é uma tela própria (#resumo, #decisoes, ...) ----------------
-const SEC = [['resumo','Resumo'],['decisoes','Decisões'],['atividade','Atividade'],['conexoes','Conexões'],['defender','Antivírus'],['historico','Histórico']];
+const SEC = [['resumo','Resumo'],['decisoes','Decisões'],['atividade','Atividade'],['conexoes','Conexões'],['defender','Antivírus'],['historico','Histórico'],['agente','Agente IA']];
 const navLinks = [...document.querySelectorAll('.nav a, .mtabs a')];
 const abaAtual = () => { const h = (location.hash || '').slice(1); return SEC.some(s => s[0] === h) ? h : 'resumo'; };
 function ir(id) { if (location.hash === '#' + id) mostrar(id); else location.hash = id; }
@@ -1130,7 +1389,7 @@ function emergencia(m) {
 }
 function mostrarAtalhos() {
   confirmar('Atalhos do teclado', '',
-    '1 a 6: trocar de aba (Resumo, Decisões, Atividade, Conexões, Defender, Histórico)\n' +
+    '1 a 7: trocar de aba (Resumo, Decisões, Atividade, Conexões, Antivírus, Histórico, Agente IA)\n' +
     'Ctrl+Shift+D: desconectar da internet (ou reconectar)\n' +
     'Ctrl+Shift+V: verificação rápida do Defender\n' +
     'Ctrl+Shift+O: verificação offline (reinicia o PC)\n' +
@@ -1148,6 +1407,191 @@ document.addEventListener('keydown', e => {
   if (e.key === '?') { e.preventDefault(); mostrarAtalhos(); return; }
   const n = +e.key; if (n >= 1 && n <= SEC.length) { e.preventDefault(); ir(SEC[n-1][0]); }
 }, true);
+
+// =====================================================================
+// AGENTE DE IA integrado. Os dados vêm em /api/estado, no campo "agente"
+// (ver AGENTE-API.md). Sem esse campo, o painel funciona normalmente e a
+// aba "Agente IA" explica que o agente ainda não está ativo.
+// Ações: POST /api/acao com acao = agenteSeguir | agenteDesfazer | agenteModo |
+//        agenteRegra | agentePausar | agenteRetomar | agenteRelatorio
+// Conversa: POST /api/agente/chat {mensagem, contexto} -> {resposta, fontes}
+// =====================================================================
+const AG_MODOS = {
+  sugere:     ['Só sugere', 'Analisa e recomenda. Nada é feito sem a sua aprovação.'],
+  emergencia: ['Age em emergência', 'Em caso crítico executa as regras de emergência ligadas e te avisa. O resto, sugere.'],
+  automatico: ['Automático', 'Segue sozinho as recomendações de manter isolado quando a confiança é muito alta e age em emergência com mais firmeza. Liberar pede a confirmação do Windows e apagar de vez pede a sua.']
+};
+const AG_VEREDITO = { ameaca:['Provável ameaça','bad'], suspeito:['Suspeito','warn'], 'falso-positivo':['Provável alarme falso','ok'] };
+const AG_RECOM = { apagar:'Apagar a ameaça', liberar:'Liberar o item', manter:'Manter isolado e observar' };
+let ag = null, agSub = 'conversa', agRelSel = null, agCtx = null, agAnt = null;
+const agChat = [];
+
+async function agAgir(acao, id, valor, btn) {
+  if (btn) { btn.disabled = true; btn.setAttribute('aria-busy','true'); }
+  try { const r = await api('/api/acao', {acao, id, valor}); toast(r.mensagem || 'Feito.', /^Erro/.test(r.mensagem || '')); }
+  catch (e) { toast('Não foi possível concluir: ' + e.message, true); }
+  finally { if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); } atualizar(); }
+}
+function agDot(id, tom, txt) { const f = $(id); if (f) f.replaceChildren(el('span','dot ' + (tom || '')), el('span', null, txt)); }
+
+// ---------- análise do agente dentro de cada item da fila de decisões
+function agDecorar(pend) {
+  if (!ag) return;
+  document.querySelectorAll('#fila .q-row').forEach(row => {
+    const it = pend.find(p => String(p.id) === row.dataset.id); if (!it) return;
+    const a = list(ag.analises).find(x => String(x.itemId) === String(it.id) && x.estado === 'pendente'); if (!a) return;
+    const [vt, vtom] = AG_VEREDITO[a.veredito] || ['—',''];
+    const box = el('div','q-ag'), hd = el('div','q-ag-h');
+    hd.append(icon('i-agent'), el('b', null, 'Análise do agente'), badge(vt, vtom, true), el('span','q-ag-c', a.confianca + '% de confiança'));
+    const m = el('div','meter ' + vtom), bar = el('i'); bar.style.width = Math.max(0, Math.min(100, a.confianca)) + '%'; m.append(bar);
+    const ev = el('ul','ev'); list(a.evidencias).forEach(x => { const li = el('li'); li.append(icon('i-check'), el('span', null, x)); ev.append(li); });
+    const rec = el('div','rec'); rec.append('Recomendação: ', el('b', null, AG_RECOM[a.recomendacao] || '—'));
+    box.append(hd, m, el('p','q-ag-t', a.resumo), ev, rec);
+    row.querySelector(':scope > div:nth-child(2)').append(box);
+    // a recomendação do agente fica destacada no próprio botão (Liberar / Apagar), ou vira o botão "Manter isolado"
+    const acts = row.querySelector('.q-acts'), botoes = [...acts.querySelectorAll('.btn')];
+    const alvoBtn = a.recomendacao === 'apagar' ? botoes.find(x => x.classList.contains('danger')) : a.recomendacao === 'liberar' ? botoes.find(x => !x.classList.contains('danger')) : null;
+    if (alvoBtn) { alvoBtn.classList.add('rec-ag', a.recomendacao === 'apagar' ? 'danger-fill' : 'primary'); alvoBtn.classList.remove('danger'); alvoBtn.title = 'Recomendado pelo agente'; }
+    else if (a.recomendacao === 'manter') {
+      const mt = el('button','btn primary rec-ag'); mt.append(document.createTextNode('Manter isolado'), icon('i-check')); mt.title = 'Recomendado pelo agente';
+      mt.onclick = async () => { if (await confirmar('Manter isolado?', it.alvo, 'O item continua isolado e o agente segue observando. Você pode liberar ou apagar depois.', 'Manter isolado', false, 'i-check')) agAgir('agenteSeguir', a.id, null, mt); };
+      acts.querySelector('.q-time').after(mt);
+    }
+    const nota = el('span','rec-nota'); nota.append(icon('i-agent'), 'Recomendado pelo agente: ' + (AG_RECOM[a.recomendacao] || '—').toLowerCase());
+    const perg = el('button','btn ghost'); perg.append(document.createTextNode('Perguntar ao agente'), icon('i-chat'));
+    perg.onclick = () => { agCtx = a; agSub = 'conversa'; ir('agente'); agMostrarCtx(); setTimeout(() => $('in-chat').focus(), 50); };
+    acts.append(nota, perg); acts.classList.add('com-ag');
+  });
+}
+
+// ---------- tudo que depende do agente fora da fila
+function agRender(dados, s) {
+  ag = dados || null;
+  const tem = !!ag;
+  document.querySelectorAll('.so-ag').forEach(e => e.hidden = !tem);
+  $('ag-vazio').hidden = tem; $('ag-conteudo').hidden = !tem;
+  if (!tem) { $('ag-line').hidden = true; agDot('ag-status', '', 'Agente IA: não instalado'); return; }
+  const meta = ag.agente || {}, modo = AG_MODOS[meta.modo] ? meta.modo : 'sugere', pausado = !!meta.pausado;
+  const an = list(ag.analises), pend = an.filter(a => a.estado === 'pendente'), ac = list(ag.acoes), ativas = ac.filter(a => a.estado === 'ativa');
+  // topo e barra de status
+  $('h-modo').textContent = pausado ? 'Pausado' : AG_MODOS[modo][0];
+  $('b-agpausa').replaceChildren(icon(pausado ? 'i-play' : 'i-pause'), el('span','lbl', pausado ? 'Retomar agente' : 'Pausar agente'));
+  agDot('ag-status', pausado ? 'warn' : 'ok', pausado ? 'Agente IA pausado' : 'Agente IA · ' + AG_MODOS[modo][0].toLowerCase());
+  $('t-ag').textContent = ativas.length; $('t-ag').hidden = !ativas.length;
+  // linha do agente no Resumo
+  const ln = $('ag-line'); ln.hidden = false; ln.className = 'ag-line ' + (pausado ? 'warn' : ativas.length ? 'bad' : '');
+  const partes = pausado ? ['Pausado: o WebGuardian continua protegendo, só as análises param'] :
+    [plural(an.length, 'alerta analisado', 'alertas analisados'), pend.length ? plural(pend.length, 'recomendação para você', 'recomendações para você') : 'nada pendente',
+     ativas.length ? plural(ativas.length, 'ação de emergência ativa', 'ações de emergência ativas') : null].filter(Boolean);
+  $('ag-line-t').textContent = 'Agente IA · ' + partes.join(' · ');
+  $('ag-pausado').style.display = pausado ? 'flex' : 'none';
+  // aba Agente IA
+  document.querySelectorAll('#ag-sub button').forEach(b => b.setAttribute('aria-pressed', b.dataset.sub === agSub));
+  document.querySelectorAll('.ag-pane').forEach(p => p.hidden = p.dataset.sub !== agSub);
+  $('n-agac').textContent = ac.length; $('n-agac').hidden = !ac.length;
+  agAcoes(ac); agRelatorios(list(ag.relatorios)); agAutonomia(meta, modo, list(ag.regras)); agChips(list(ag.sugestoes));
+  if (agSub === 'conversa') agDesenharChat();
+}
+function agAcoes(ac) {
+  const tb = $('ag-acoes'); tb.replaceChildren();
+  for (const x of ac) {
+    const tr = el('tr'), a = el('td'), m = el('td','dim', x.motivo), st = el('td'), bt = el('td');
+    a.append(el('div','nm', x.acao)); const sub = el('div','mono', x.alvo); sub.style.color = 'var(--t3)'; a.append(sub); a.style.whiteSpace = m.style.whiteSpace = 'normal';
+    st.append(badge(x.estado === 'ativa' ? 'Ativa' : 'Desfeita', x.estado === 'ativa' ? 'bad' : '', true));
+    if (x.estado === 'ativa' && x.reversivel) { const b = el('button','btn', 'Desfazer'); b.onclick = async () => {
+      if (await confirmar('Desfazer esta ação?', x.alvo, 'O agente devolve tudo como estava antes. Só desfaça se tiver certeza de que não era uma ameaça.', 'Desfazer ação', true, 'i-undo')) agAgir('agenteDesfazer', x.id, null, b); }; bt.append(b); }
+    tr.append(el('td','mono', curta(x.quando)), a, m, st, bt); tb.append(tr);
+  }
+  if (!ac.length) emptyRow(tb, 5, 'O agente ainda não precisou agir sozinho.');
+}
+function agRelatorios(rs) {
+  if (!agRelSel || !rs.some(r => r.id === agRelSel)) agRelSel = rs[0] && rs[0].id;
+  const ul = $('ag-rlist'); ul.replaceChildren();
+  for (const r of rs) { const li = el('li'), b = el('button'); b.type = 'button'; if (r.id === agRelSel) b.setAttribute('aria-current','true');
+    b.append(el('span', null, r.titulo || r.periodo), el('small', null, (r.resumo || '').slice(0, 60) + '…'), el('time', null, curta(r.quando)));
+    b.onclick = () => { agRelSel = r.id; agRelatorios(rs); }; li.append(b); ul.append(li); }
+  if (!rs.length) ul.append(el('li','empty','Nenhum relatório ainda.'));
+  const box = $('ag-rep'); box.replaceChildren(); const r = rs.find(x => x.id === agRelSel); if (!r) return;
+  const body = el('div','rep'), h = el('div','rp-h'); h.append(el('h3', null, r.titulo || r.periodo), el('span', null, 'gerado ' + rel(r.quando)));
+  const ulh = el('ul'); list(r.destaques).forEach(d => ulh.append(el('li', null, d)));
+  body.append(h, el('p', null, r.resumo), ulh);
+  const nums = el('div','rnums'), nn = r.numeros || {};
+  [['Eventos lidos', nn.eventos], ['Alertas', nn.alertas], ['Itens isolados', nn.isolados], ['Ações automáticas', nn.acoesAuto]].forEach(([k, v]) => {
+    const d = el('div'); d.append(el('small', null, k), el('b', null, v != null ? Number(v).toLocaleString('pt-BR') : '—')); nums.append(d); });
+  box.append(body, nums);
+}
+function agAutonomia(meta, modo, regras) {
+  document.querySelectorAll('#ag-lvls button').forEach(b => b.setAttribute('aria-pressed', b.dataset.modo === modo));
+  const ul = $('ag-regras'); ul.replaceChildren();
+  for (const r of regras) {
+    const li = el('li', r.ligada ? '' : 'off'); li.append(el('b', null, r.nome), el('small', null, r.descricao));
+    const tg = el('button','tg'); tg.type = 'button'; tg.setAttribute('role','switch'); tg.setAttribute('aria-checked', !!r.ligada); tg.setAttribute('aria-label', r.nome);
+    tg.onclick = async () => { const ligar = !r.ligada;
+      if (await confirmar(ligar ? 'Ligar esta regra?' : 'Desligar esta regra?', r.nome,
+          ligar ? 'O agente passa a fazer isso sozinho em emergência e te avisa na hora. Dá para desfazer em "Ações automáticas".' : 'O agente deixa de agir sozinho nesse caso e passa só a recomendar.',
+          ligar ? 'Ligar regra' : 'Desligar regra', false, 'i-bolt')) agAgir('agenteRegra', r.id, ligar, tg); };
+    li.append(tg); ul.append(li);
+  }
+  if (modo === 'sugere' && regras.length) { const li = el('li'); li.append(el('small', null, 'No modo "Só sugere" as regras ficam guardadas, mas o agente não executa nenhuma delas.')); ul.append(li); }
+  const pv = $('ag-priv'); pv.replaceChildren();
+  [['Modelo de IA', meta.modelo || '—'], ['O que o agente recebe', meta.privacidade || '—'], ['Última análise', meta.ultimaAnalise ? rel(meta.ultimaAnalise) : '—']].forEach(([k, v]) => {
+    const w = el('div'); w.append(el('dt', null, k), el('dd', null, v)); pv.append(w); });
+}
+// ---------- conversa
+function agChips(sug) { const c = $('chips'); if (c.dataset.ok === String(sug.length)) return; c.dataset.ok = sug.length; c.replaceChildren();
+  sug.forEach(t => { const b = el('button', null, t); b.type = 'button'; b.onclick = () => agEnviar(t); c.append(b); }); }
+function agMostrarCtx() { $('ctx').style.display = agCtx ? 'flex' : 'none'; $('ctx-txt').textContent = agCtx ? 'Sobre: #' + agCtx.itemId + ' ' + agCtx.titulo : ''; }
+function agDesenharChat() {
+  const box = $('msgs'); box.replaceChildren();
+  if (!agChat.length) agChat.push({de:'ag', tx:'Oi. Eu acompanho o WebGuardian neste PC e explico o que ele encontra. Pergunte sobre qualquer alerta, programa ou conexão.'});
+  for (const m of agChat) {
+    const d = el('div','msg ' + m.de), av = el('div','av'); av.append(icon(m.de === 'ag' ? 'i-agent' : 'i-user'));
+    const c = el('div'), who = el('div','who'); who.append(el('b', null, m.de === 'ag' ? 'Agente' : 'Você'), m.quando ? hhmm(m.quando) : '');
+    const tx = el('div','tx'); if (m.digitando) { const t = el('span','typing'); t.append(el('i'), el('i'), el('i')); tx.append(t); } else tx.textContent = m.tx;
+    c.append(who, tx);
+    if (m.fontes && m.fontes.length) { const s = el('div','srcs'); m.fontes.forEach(f => { const a = el('a', null, (f.tipo || 'fonte') + ' ' + (f.id || f.texto || ''));
+      a.href = f.tipo === 'ação' ? '#agente' : f.tipo === 'relatório' ? '#agente' : '#decisoes'; s.append(a); }); c.append(s); }
+    // sugestões de seguimento: só na última resposta do agente
+    if (m === agChat[agChat.length - 1] && m.sug && m.sug.length) { const s = el('div','sug'); m.sug.forEach(t => { const b = el('button', null, t); b.type = 'button'; b.onclick = () => agEnviar(t); s.append(b); }); c.append(s); }
+    d.append(av, c); box.append(d);
+  }
+  box.scrollTop = box.scrollHeight;
+}
+async function agEnviar(texto) {
+  texto = (texto || '').trim(); if (!texto) return;
+  $('in-chat').value = ''; agAltura();
+  agChat.push({de:'eu', tx:texto, quando:new Date()}); const p = {de:'ag', digitando:true}; agChat.push(p); agDesenharChat();
+  // "anterior" é o assunto, o item e a oferta da última resposta: é o que faz "e ontem?", "por quê?" e "sim" funcionarem
+  try { const r = await api('/api/agente/chat', {mensagem:texto, contexto: agCtx ? agCtx.id : null, anterior: agAnt});
+    agAnt = r.anterior || null;
+    Object.assign(p, {digitando:false, tx:r.resposta || '(sem resposta)', fontes:list(r.fontes), sug:list(r.sugestoes), quando:new Date()}); }
+  catch (e) { Object.assign(p, {digitando:false, tx:'Não consegui responder agora (' + e.message + '). Tente de novo em instantes.', quando:new Date()}); }
+  agDesenharChat();
+}
+function agAltura() { const t = $('in-chat'); t.style.height = '48px'; t.style.height = Math.min(160, t.scrollHeight) + 'px'; }
+$('f-chat').onsubmit = e => { e.preventDefault(); agEnviar($('in-chat').value); };
+$('in-chat').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); agEnviar($('in-chat').value); } });
+$('in-chat').addEventListener('input', agAltura);
+$('ctx-x').onclick = () => { agCtx = null; agAnt = null; agMostrarCtx(); };
+$('b-limpar-chat').onclick = () => { agChat.length = 0; agCtx = null; agAnt = null; agMostrarCtx(); agDesenharChat(); };
+document.querySelectorAll('#ag-sub button').forEach(b => b.onclick = () => { agSub = b.dataset.sub; if (ultimo) render(ultimo); agMostrarCtx(); });
+document.querySelectorAll('#ag-lvls button').forEach(b => b.onclick = async () => {
+  const m = b.dataset.modo; if (!ag || (ag.agente || {}).modo === m) return;
+  const txt = { sugere:'O agente só analisa e recomenda. Nenhuma ação é feita sem a sua aprovação.',
+    emergencia:'Em caso crítico o agente executa as regras de emergência ligadas e te avisa na hora. Todo o resto continua esperando você.',
+    automatico:'O agente mantém isolado sozinho o que tiver confiança muito alta e congela programas suspeitos a partir de 80% de confiança (em vez de 90%). Liberar continua pedindo a confirmação do Windows e apagar de vez pede a sua.' }[m];
+  if (await confirmar('Mudar para "' + AG_MODOS[m][0] + '"?', '', txt, 'Mudar modo', m === 'automatico', 'i-sliders')) agAgir('agenteModo', null, m, b);
+});
+$('b-agpausa').onclick = async () => {
+  if (!ag) return; const p = (ag.agente || {}).pausado;
+  if (p) return agAgir('agenteRetomar', null, null, $('b-agpausa'));
+  if (await confirmar('Pausar o agente de IA?', '', 'As análises e as ações automáticas do agente param até você retomar. O WebGuardian continua isolando ameaças normalmente.', 'Pausar agente', false, 'i-pause')) agAgir('agentePausar', null, null, $('b-agpausa'));
+};
+$('b-agrel').onclick = () => agAgir('agenteRelatorio', null, null, $('b-agrel'));
+
+// liga o agente ao ciclo de desenho do painel
+const _renderBase = render;
+render = function (s) { _renderBase(s); agRender(s.agente, s); agDecorar(list(s.quarentena).filter(i => i.estado === 'ISOLADO')); };
 
 $('b-ajuda').onclick = mostrarAtalhos;
 atualizar(); setInterval(atualizar, 5000);

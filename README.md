@@ -8,9 +8,9 @@ com o Windows Defender.
 > **Tudo roda só no seu computador.** Não há servidor, conta, nem envio de dados seus para a
 > internet. Cada pessoa que instala tem o seu WebGuardian independente.
 
-**Versão atual: 2.0.0**
+**Versão atual: 2.1.0**
 
-### ⬇️ [Baixar o WebGuardian 2.0.0 (versão mais recente)](https://github.com/LuizZanchetta/WebGuardian/archive/refs/tags/v2.0.0.zip)
+### ⬇️ [Baixar o WebGuardian 2.1.0 (versão mais recente)](https://github.com/LuizZanchetta/WebGuardian/archive/refs/tags/v2.1.0.zip)
 
 O que mudou nesta versão e nas anteriores: **[Releases](https://github.com/LuizZanchetta/WebGuardian/releases/latest)**.
 Depois de baixar, siga a [Instalação](#instalação).
@@ -44,7 +44,7 @@ Depois de baixar, siga a [Instalação](#instalação).
 | **Proxy** configurado, linhas novas no arquivo **hosts**, **DNS** trocado à mão, **acesso remoto (RDP)** ligado (truques para desviar você a sites falsos ou abrir o PC ao invasor) | **Desfaz na hora** e pergunta: Liberar (aceitar) ou Apagar (manter desfeito) |
 | Regra nova no **firewall** liberando entrada para programa suspeito | Desativa a regra |
 | **Extensão nova** no Edge, Chrome, Brave, Opera ou Firefox | Alerta com o nome da extensão |
-| **Pendrive, celular ou teclado USB** conectado pela primeira vez | Alerta (teclado novo é alerta crítico: pode ser um pendrive que digita comandos) |
+| **Pendrive, celular ou teclado USB** conectado pela primeira vez | Alerta (teclado novo é alerta crítico: pode ser um pendrive que digita comandos). O mesmo modelo em outra porta USB só fica registrado |
 
 ### Verificação de downloads
 O WebGuardian vigia a pasta **Downloads** (todos os arquivos) e também a **Área de Trabalho**
@@ -174,6 +174,22 @@ Abra pelo atalho **WebGuardian** ou dê dois cliques no **escudo perto do relóg
 | **Conexões** | Programas conectados à internet agora (suspeitos em destaque) |
 | **Antivírus** | Antivírus ativo (Defender ou outro, como o Avast), base de ameaças, proteções extras, verificações, ameaças e downloads verificados |
 | **Histórico** | Decisões já tomadas, **Exportar relatório** (HTML para salvar em PDF + planilha CSV na Área de Trabalho) e a lista de **programas confiáveis** (os que você liberou; vale só para o mesmo arquivo) |
+| **Agente IA** | Conversa com o agente, o que ele fez sozinho (com **Desfazer**), resumos do dia e a **autonomia** dele (regras de emergência) |
+
+### Agente do painel
+O agente acompanha o WebGuardian e explica o que ele encontra: dentro de cada item em
+**Decisões** aparece a análise dele (veredito, confiança, o que viu e a recomendação), e na aba
+**Agente IA** você conversa com ele.
+
+- **Funciona só no seu PC, por regras, sem internet.** Não usa modelo de IA na nuvem, não tem
+  chave de API e não envia nada, nem metadados.
+- Pergunte do seu jeito ("está tudo bem?", "qem entrou no pc hj?", "o anydesk está aberto?",
+  "o que é proxy?"). Ele entende erros de digitação, várias perguntas numa mensagem e o fio da
+  conversa: "e ontem?", "e às 14h?", "por quê?", "mais detalhes", "fui eu", "não fui eu".
+- **Autonomia:** "Só sugere", "Age em emergência" (padrão) ou "Automático". Em emergência ele
+  pode desconectar a internet, congelar um programa suspeito ou bloquear um IP, conforme as regras
+  ligadas. **Liberar e apagar ficam sempre com você**, e tudo o que ele faz sozinho pode ser
+  desfeito.
 
 ### Atividade por sessão: quem acessou a máquina
 Cada vez que o PC é **ligado**, a atividade começa do zero: a da sessão anterior é
@@ -200,7 +216,7 @@ painel; o histórico oficial continua em *Segurança do Windows › Histórico d
 | `Ctrl` + `Shift` + `V` | Verificação rápida do Defender |
 | `Ctrl` + `Shift` + `O` | Verificação offline (reinicia o PC) |
 | `Ctrl` + `Shift` + `R` | Ir para as decisões pendentes |
-| `1` a `6` | Trocar de aba |
+| `1` a `7` | Trocar de aba (`7` é o Agente IA) |
 | `?` | Mostrar os atalhos |
 
 Desconectar e verificação offline pedem confirmação: o foco já fica no botão de confirmar,
@@ -304,6 +320,9 @@ repositório para avisar.
   base do próprio Windows Defender, feita pelo Windows, e **uma consulta por dia** à página pública
   de Releases do GitHub oficial, para avisar quando sai versão nova (só lê; nada é enviado e nada é
   instalado sozinho).
+- O **agente do painel** lê os registros do WebGuardian aqui mesmo e não usa a internet.
+  Pausar o agente, desligar uma regra dele, deixá-lo em "Só sugere" e desfazer uma ação dele
+  também pedem a confirmação do Windows.
 - Configurações de segurança do Windows (proteções extras do Defender) só mudam quando
   **você** clica no botão correspondente.
 
@@ -351,6 +370,9 @@ powershell -ExecutionPolicy Bypass -File app\compilar.ps1
 
 Notas completas de cada versão: [CHANGELOG](CHANGELOG.md) e [Releases](https://github.com/LuizZanchetta/WebGuardian/releases).
 
+- **2.1.0** — agente no painel (local, sem internet): análise de cada item isolado, conversa que
+  entende o contexto, resumo do dia e regras de emergência; sem janela preta ao ligar o PC; mesmo
+  teclado em outra porta USB não é mais alerta crítico; drivers do Windows sem alarme falso.
 - **2.0.0** — visual novo do painel; confirmação pelo Windows para ações sensíveis; atualização
   conferida pela cópia instalada; vigia proxy, hosts, DNS, acesso remoto, firewall, extensões de
   navegador e dispositivos USB; aviso de versão nova; relatório exportável; programas confiáveis.
