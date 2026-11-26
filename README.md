@@ -8,9 +8,9 @@ com o Windows Defender.
 > **Tudo roda só no seu computador.** Não há servidor, conta, nem envio de dados seus para a
 > internet. Cada pessoa que instala tem o seu WebGuardian independente.
 
-**Versão atual: 2.1.0**
+**Versão atual: 2.1.1**
 
-### ⬇️ [Baixar o WebGuardian 2.1.0 (versão mais recente)](https://github.com/LuizZanchetta/WebGuardian/archive/refs/tags/v2.1.0.zip)
+### ⬇️ [Baixar o WebGuardian 2.1.1 (versão mais recente)](https://github.com/LuizZanchetta/WebGuardian/archive/refs/tags/v2.1.1.zip)
 
 O que mudou nesta versão e nas anteriores: **[Releases](https://github.com/LuizZanchetta/WebGuardian/releases/latest)**.
 Depois de baixar, siga a [Instalação](#instalação).
@@ -179,7 +179,9 @@ Abra pelo atalho **WebGuardian** ou dê dois cliques no **escudo perto do relóg
 ### Agente do painel
 O agente acompanha o WebGuardian e explica o que ele encontra: dentro de cada item em
 **Decisões** aparece a análise dele (veredito, confiança, o que viu e a recomendação), e na aba
-**Agente IA** você conversa com ele.
+**Agente IA** você conversa com ele. Em qualquer outra aba, o **ícone flutuante** no canto
+inferior direito abre a mesma conversa sem sair da tela (o número vermelho nele mostra as
+recomendações esperando você).
 
 - **Funciona só no seu PC, por regras, sem internet.** Não usa modelo de IA na nuvem, não tem
   chave de API e não envia nada, nem metadados.
@@ -370,6 +372,7 @@ powershell -ExecutionPolicy Bypass -File app\compilar.ps1
 
 Notas completas de cada versão: [CHANGELOG](CHANGELOG.md) e [Releases](https://github.com/LuizZanchetta/WebGuardian/releases).
 
+- **2.1.1** — ícone flutuante do agente: a mesma conversa em qualquer aba do painel.
 - **2.1.0** — agente no painel (local, sem internet): análise de cada item isolado, conversa que
   entende o contexto, resumo do dia e regras de emergência; sem janela preta ao ligar o PC; mesmo
   teclado em outra porta USB não é mais alerta crítico; drivers do Windows sem alarme falso.

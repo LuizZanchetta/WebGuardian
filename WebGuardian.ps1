@@ -60,7 +60,7 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
-$VersaoGuardiao = '2.1.0'   # 2.1.0: agente do painel (local, por regras, sem internet) com conversa que entende o contexto; sem janela preta ao ligar (B1); teclado pelo modelo (B2); caminhos de driver (B3)
+$VersaoGuardiao = '2.1.1'   # 2.1.1: ícone flutuante do agente no painel · 2.1.0: agente do painel (local, por regras, sem internet) com conversa que entende o contexto; sem janela preta ao ligar (B1); teclado pelo modelo (B2); caminhos de driver (B3)
                             # 2.0.0: painel novo; confirmação do Windows para ações sensíveis; atualização conferida pela cópia
                             #        instalada; proxy/hosts/DNS/RDP/firewall; extensões; USB; aviso de versão; relatório; confiáveis
                             # 1.9.1: detecção de conexões: portas dos fundos, tentativas de conexão, número de processo

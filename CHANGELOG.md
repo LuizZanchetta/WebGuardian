@@ -2,6 +2,18 @@
 
 Cada versão é publicada em [Releases](https://github.com/LuizZanchetta/WebGuardian/releases) com a etiqueta `vX.Y.Z`. Toda versão oficial é assinada digitalmente: a impressão digital precisa ser **`WG-D0C5-ACA9-5777-6D53-ED11`**.
 
+## 2.1.1 — 2026-11-26
+
+**Converse com o agente de qualquer aba, pelo ícone flutuante**
+
+### Novidade
+- **Ícone flutuante do agente** no canto inferior direito do painel, em todas as abas (na aba Agente IA ele some, porque a conversa já está ali). Um clique abre uma conversa compacta por cima da tela em que você está.
+- É **a mesma conversa** da aba Agente IA: o que você perguntou num lugar aparece no outro, e perguntas de seguimento ("e ontem?", "por quê?", "fui eu") funcionam nos dois.
+- Um **número vermelho** no ícone mostra quantas recomendações do agente esperam você. Com o agente pausado, o ícone fica cinza.
+- Na conversa compacta: **Nova conversa**, **Abrir na aba Agente IA** e **Fechar** (a tecla Esc também fecha).
+- Os avisos na tela sobem um pouco para não ficar por cima do ícone.
+- Continua tudo só no seu PC, sem internet.
+
 ## 2.1.0 — 2026-11-26
 
 **Agente no painel, que conversa e entende o contexto, e correção dos alarmes falsos da 2.0**

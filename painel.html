@@ -498,6 +498,37 @@ td .btn{height:32px;padding:0 12px;font-size:13px}
 .ctx{display:none;align-items:center;gap:8px;margin:12px 16px 0;padding:6px 10px;background:var(--l3);font-size:12px;color:var(--t2);width:max-content;max-width:calc(100% - 32px)}
 .ctx button{border:0;background:transparent;color:var(--t3);cursor:pointer;font:inherit;padding:0 2px}
 
+/* ícone flutuante do agente: a mesma conversa, em qualquer aba */
+.fab{position:fixed;right:16px;bottom:48px;z-index:60;width:56px;height:56px;display:grid;place-items:center;border:0;background:var(--blue);color:#fff;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.fab[hidden]{display:none}
+.fab:hover{background:var(--blue-h)} .fab:active,.fab[aria-expanded="true"]{background:var(--blue-a)}
+.fab:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.fab .i{width:24px;height:24px}
+.fab.pausado{background:var(--l3);color:var(--t2)}
+.fab-n{position:absolute;top:-6px;right:-6px;min-width:20px;height:20px;padding:0 6px;display:grid;place-items:center;background:var(--red-fill);color:#fff;font:600 12px/1 var(--sans)}
+.fab-n[hidden]{display:none}
+.flchat{position:fixed;right:16px;bottom:112px;z-index:61;width:400px;max-width:calc(100vw - 32px);height:min(560px,calc(100vh - 180px));display:grid;grid-template-rows:auto minmax(0,1fr) auto;background:var(--l1);border:1px solid var(--bd-2);box-shadow:0 4px 16px rgba(0,0,0,.35)}
+.flchat[hidden]{display:none}
+.flchat header{display:flex;align-items:center;gap:8px;height:48px;padding:0 4px 0 16px;border-bottom:1px solid var(--bd)}
+.flchat header b{font-weight:600;font-size:14px}
+.flchat header small{color:var(--t3);font-size:12px;letter-spacing:.32px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.flchat header .end{margin-left:auto;display:flex}
+.flchat header button{width:40px;height:40px;display:grid;place-items:center;border:0;background:transparent;color:var(--t2);cursor:pointer;font:400 16px/1 var(--sans)}
+.flchat header button:hover{background:var(--l3);color:var(--t1)}
+.flchat header button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.flchat .msgs{padding:16px;gap:16px}
+.flchat .msg{gap:8px;grid-template-columns:24px minmax(0,1fr)}
+.flchat .msg.eu{grid-template-columns:minmax(0,1fr) 24px}
+.flchat .msg .av{width:24px;height:24px}
+.flchat .msg .tx{font-size:13px;line-height:1.55}
+.flchat .chips{padding:8px 12px 0} .flchat .chips button{height:28px;padding:0 10px;font-size:12px}
+.flchat .ctx{margin:8px 12px 0}
+.flchat .inrow{padding:8px 12px 12px}
+.flchat .inrow textarea{height:40px;min-height:40px;max-height:120px;padding:10px 12px;font-size:13px}
+.flchat .inrow .btn{height:40px;padding:0 12px}
+body.fab-on .toast{bottom:116px}
+@media (max-width:600px){ .flchat{left:16px;width:auto;height:calc(100vh - 200px)} }
+
 /* relatórios */
 .rep{padding:20px 16px}
 .rep .rp-h{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
@@ -894,6 +925,25 @@ td .btn{height:32px;padding:0 12px;font-size:13px}
   </div>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<!-- Agente: ícone flutuante e conversa compacta (a mesma conversa da aba Agente IA) -->
+<button class="fab" id="fab-ag" type="button" aria-label="Conversar com o agente" aria-expanded="false" aria-controls="fl-ag" title="Conversar com o agente" hidden>
+  <svg class="i"><use href="#i-chat"/></svg><span class="fab-n" id="fab-n" hidden></span></button>
+<section class="flchat" id="fl-ag" role="dialog" aria-labelledby="fl-t" hidden>
+  <header><svg class="i"><use href="#i-agent"/></svg><b id="fl-t">Agente</b><small>só neste PC, sem internet</small>
+    <span class="end"><button type="button" id="fl-nova" title="Nova conversa" aria-label="Nova conversa"><svg class="i"><use href="#i-refresh"/></svg></button>
+      <button type="button" id="fl-aba" title="Abrir na aba Agente IA" aria-label="Abrir na aba Agente IA"><svg class="i"><use href="#i-agent"/></svg></button>
+      <button type="button" id="fl-x" title="Fechar (Esc)" aria-label="Fechar">✕</button></span></header>
+  <div class="msgs" id="fl-msgs" aria-live="polite"></div>
+  <div class="compose">
+    <div class="ctx" id="fl-ctx"><svg class="i"><use href="#i-agent"/></svg><span id="fl-ctx-txt"></span><button type="button" id="fl-ctx-x" aria-label="Remover contexto">✕</button></div>
+    <div class="chips" id="fl-chips"></div>
+    <form class="inrow" id="fl-form">
+      <label class="hide" for="fl-in">Mensagem para o agente</label>
+      <textarea id="fl-in" rows="1" placeholder="Pergunte ao agente…"></textarea>
+      <button class="btn primary" type="submit" aria-label="Enviar"><svg class="i"><use href="#i-send"/></svg></button>
+    </form>
+  </div>
+</section>
 
 <script>
 const TOKEN = '__TOKEN__';
@@ -1490,7 +1540,8 @@ function agRender(dados, s) {
   document.querySelectorAll('.ag-pane').forEach(p => p.hidden = p.dataset.sub !== agSub);
   $('n-agac').textContent = ac.length; $('n-agac').hidden = !ac.length;
   agAcoes(ac); agRelatorios(list(ag.relatorios)); agAutonomia(meta, modo, list(ag.regras)); agChips(list(ag.sugestoes));
-  if (agSub === 'conversa') agDesenharChat();
+  if (agSub === 'conversa' || flAberto()) agDesenharChat();
+  agFab();
 }
 function agAcoes(ac) {
   const tb = $('ag-acoes'); tb.replaceChildren();
@@ -1538,12 +1589,23 @@ function agAutonomia(meta, modo, regras) {
     const w = el('div'); w.append(el('dt', null, k), el('dd', null, v)); pv.append(w); });
 }
 // ---------- conversa
-function agChips(sug) { const c = $('chips'); if (c.dataset.ok === String(sug.length)) return; c.dataset.ok = sug.length; c.replaceChildren();
-  sug.forEach(t => { const b = el('button', null, t); b.type = 'button'; b.onclick = () => agEnviar(t); c.append(b); }); }
-function agMostrarCtx() { $('ctx').style.display = agCtx ? 'flex' : 'none'; $('ctx-txt').textContent = agCtx ? 'Sobre: #' + agCtx.itemId + ' ' + agCtx.titulo : ''; }
+function agChips(sug) {
+  for (const id of ['chips', 'fl-chips']) { const c = $(id); if (c.dataset.ok === String(sug.length)) continue; c.dataset.ok = sug.length; c.replaceChildren();
+    sug.forEach(t => { const b = el('button', null, t); b.type = 'button'; b.onclick = () => agEnviar(t); c.append(b); }); }
+  // na conversa compacta, as perguntas prontas só aparecem enquanto ela está vazia
+  $('fl-chips').hidden = agChat.length > 1;
+}
+function agMostrarCtx() { const t = agCtx ? 'Sobre: #' + agCtx.itemId + ' ' + agCtx.titulo : '';
+  $('ctx').style.display = $('fl-ctx').style.display = agCtx ? 'flex' : 'none'; $('ctx-txt').textContent = $('fl-ctx-txt').textContent = t; }
+const flAberto = () => !$('fl-ag').hidden;
 function agDesenharChat() {
-  const box = $('msgs'); box.replaceChildren();
   if (!agChat.length) agChat.push({de:'ag', tx:'Oi. Eu acompanho o WebGuardian neste PC e explico o que ele encontra. Pergunte sobre qualquer alerta, programa ou conexão.'});
+  agDesenharEm($('msgs'));
+  if (flAberto()) agDesenharEm($('fl-msgs'));
+  $('fl-chips').hidden = agChat.length > 1;
+}
+function agDesenharEm(box) {
+  box.replaceChildren();
   for (const m of agChat) {
     const d = el('div','msg ' + m.de), av = el('div','av'); av.append(icon(m.de === 'ag' ? 'i-agent' : 'i-user'));
     const c = el('div'), who = el('div','who'); who.append(el('b', null, m.de === 'ag' ? 'Agente' : 'Você'), m.quando ? hhmm(m.quando) : '');
@@ -1557,9 +1619,10 @@ function agDesenharChat() {
   }
   box.scrollTop = box.scrollHeight;
 }
-async function agEnviar(texto) {
+async function agEnviar(texto, campo) {
   texto = (texto || '').trim(); if (!texto) return;
-  $('in-chat').value = ''; agAltura();
+  if (campo) { campo.value = ''; } else { $('in-chat').value = ''; }
+  agAltura(); flAltura();
   agChat.push({de:'eu', tx:texto, quando:new Date()}); const p = {de:'ag', digitando:true}; agChat.push(p); agDesenharChat();
   // "anterior" é o assunto, o item e a oferta da última resposta: é o que faz "e ontem?", "por quê?" e "sim" funcionarem
   try { const r = await api('/api/agente/chat', {mensagem:texto, contexto: agCtx ? agCtx.id : null, anterior: agAnt});
@@ -1572,8 +1635,34 @@ function agAltura() { const t = $('in-chat'); t.style.height = '48px'; t.style.h
 $('f-chat').onsubmit = e => { e.preventDefault(); agEnviar($('in-chat').value); };
 $('in-chat').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); agEnviar($('in-chat').value); } });
 $('in-chat').addEventListener('input', agAltura);
-$('ctx-x').onclick = () => { agCtx = null; agAnt = null; agMostrarCtx(); };
-$('b-limpar-chat').onclick = () => { agChat.length = 0; agCtx = null; agAnt = null; agMostrarCtx(); agDesenharChat(); };
+$('ctx-x').onclick = $('fl-ctx-x').onclick = () => { agCtx = null; agAnt = null; agMostrarCtx(); };
+$('b-limpar-chat').onclick = $('fl-nova').onclick = () => { agChat.length = 0; agCtx = null; agAnt = null; agMostrarCtx(); agDesenharChat(); };
+// ---------- ícone flutuante: abre a mesma conversa em qualquer aba (some na própria aba Agente IA)
+function flAltura() { const t = $('fl-in'); t.style.height = '40px'; t.style.height = Math.min(120, t.scrollHeight) + 'px'; }
+function flAbrir(abrir) {
+  $('fl-ag').hidden = !abrir; $('fab-ag').setAttribute('aria-expanded', String(abrir));
+  if (abrir) { agDesenharChat(); agMostrarCtx(); setTimeout(() => $('fl-in').focus(), 30); }
+}
+function agFab() {
+  const naAba = abaAtual() === 'agente', ativo = !!(ag && ag.agente);
+  $('fab-ag').hidden = !ativo || naAba;
+  document.body.classList.toggle('fab-on', ativo && !naAba);
+  if ((naAba || !ativo) && flAberto()) flAbrir(false);
+  if (!ativo) return;
+  const pausado = !!ag.agente.pausado, pend = list(ag.analises).filter(a => a.estado === 'pendente').length;
+  $('fab-ag').classList.toggle('pausado', pausado);
+  $('fab-n').textContent = pend; $('fab-n').hidden = !pend;
+  const dica = pausado ? 'Conversar com o agente (pausado)' : pend ? 'Conversar com o agente: ' + plural(pend, 'recomendação para você', 'recomendações para você') : 'Conversar com o agente';
+  $('fab-ag').title = dica; $('fab-ag').setAttribute('aria-label', dica);
+}
+$('fab-ag').onclick = () => flAbrir(!flAberto());
+$('fl-x').onclick = () => { flAbrir(false); $('fab-ag').focus(); };
+$('fl-aba').onclick = () => { flAbrir(false); agSub = 'conversa'; ir('agente'); setTimeout(() => $('in-chat').focus(), 50); };
+$('fl-form').onsubmit = e => { e.preventDefault(); agEnviar($('fl-in').value, $('fl-in')); };
+$('fl-in').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); agEnviar($('fl-in').value, $('fl-in')); } });
+$('fl-in').addEventListener('input', flAltura);
+$('fl-ag').addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); flAbrir(false); $('fab-ag').focus(); } });
+window.addEventListener('hashchange', agFab);
 document.querySelectorAll('#ag-sub button').forEach(b => b.onclick = () => { agSub = b.dataset.sub; if (ultimo) render(ultimo); agMostrarCtx(); });
 document.querySelectorAll('#ag-lvls button').forEach(b => b.onclick = async () => {
   const m = b.dataset.modo; if (!ag || (ag.agente || {}).modo === m) return;
